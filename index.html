@@ -1324,6 +1324,7 @@ function render(){
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("on"));
   $("#topdate").textContent = new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
   if(!S.settings.onboarded){ $("#v-onb").classList.add("on"); renderOnboard(); return; }
+  if($("#v-onb").innerHTML) $("#v-onb").innerHTML="";   // a hidden view is still queryable; stale controls are stale bugs
   $("#v-"+VIEW).classList.add("on");
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current", b.dataset.v===VIEW?"true":"false"));
   ({today:renderToday, train:renderTrain, log:renderLog, body:renderBody, setup:renderSetup})[VIEW]();
@@ -1716,6 +1717,7 @@ async function handle(a,t,ev){
   case "ob-sched": { OB.mins=+$("#omins").value; OB.phase=$("#ophase").value;
     OB.pairs=buildPairs(); OB.pi=0; OB.wins={}; OB.step=4; return renderOnboard(); }
   case "ob-pick": {
+    if(!OB.pairs || OB.pi>=OB.pairs.length) return;
     const w=t.dataset.w, p=OB.pairs[OB.pi];
     OB.wins[w]=(OB.wins[w]||0)+1; const l=p[0]===w?p[1]:p[0]; OB.wins[l]=(OB.wins[l]||0)-1;
     OB.pi++;
