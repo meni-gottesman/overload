@@ -1,0 +1,76 @@
+# Overload — working rules
+
+Single-file app: `index.html`. Vanilla JS, zero dependencies, no build step.
+Deployed by Cloudflare Pages on every push to `main` → https://overload-o3a.pages.dev
+Tests: `node test.js` (87 assertions).
+
+## The one rule that outranks everything
+
+**Meni's training log must survive every change you make.**
+
+His data lives in two places, and neither is yours to migrate:
+
+1. **IndexedDB `overload`** on the device, object stores `events` / `kv` / `photos`.
+2. **`meni-gottesman/overload-data`** (private), as NDJSON — one file per training day.
+
+Every piece of derived state — working loads, weekly volume, the decision log — is a
+*fold over the event log*. `rebuild()` replays it from scratch on every launch. That is
+what makes the data durable, and it is also what makes it fragile in one specific way:
+
+**Rename an event `type` or an existing payload field and the history silently stops
+counting.** Not an error. Not a crash. His sets from last month just quietly stop
+existing. That is the failure mode to be paranoid about.
+
+So:
+
+- **Never** change `DB_NAME`, the object store names, or `DB_VER` without a real migration.
+- **Never** rename or remove an existing event `type` string: `settings`, `set`, `voidSet`,
+  `weight`, `waist`, `note`, `photo`, `irritation`, `redflag`, `planStart`, `planEdit`,
+  `sessionEnd`.
+- **Never** rename or repurpose an existing field in an event payload. Adding a new
+  *optional* field is fine and is how this schema is meant to grow.
+- **Never** write a migration that rewrites past events. Append a correcting event instead —
+  that is exactly what `voidSet` is for.
+- **Never** make `rebuild()` throw on an event shape it does not recognise. Old logs must
+  replay on new code, forever.
+
+`fixtures/v1-log.json` is a frozen sample of real v1 event shapes, and `test.js` replays it
+and asserts the derived state. **If that test fails, you broke backwards compatibility.**
+Do not edit the fixture to make it pass — the fixture is the contract.
+
+## Before any push
+
+1. `node test.js` — every assertion green. A red test is a stop, not a note.
+2. Actually open the app and use it. Most real defects in this codebase have been found by
+   driving the browser, not by reading: a warm-up eating a working set, a mid-session reload
+   crashing the view, a set edit showing twice. None of those were visible in the source.
+3. Never `--force`. The log repo and the app repo both keep history on purpose.
+
+## Design commitments that are not up for casual revision
+
+- **Every plan change emits a sentence.** `emit()` throws without a rule id and a sentence.
+  This is deliberate. Do not soften it into a warning.
+- **Loads are members of `loadableSet()`.** Never prescribe a weight the gym cannot make.
+- **No `alert()` or `confirm()`.** A native modal blocks the whole page on a phone.
+- **No external subresource.** No CDN, no webfont, no analytics. The page holds a token with
+  write access to a private repo; a third-party script would run with full authority over it.
+  The CSP pins `connect-src` to `api.github.com`.
+- **Four weight tiers, 4:1 ratio, ≤4 distinct values** (`weightsLegal`). The per-muscle
+  evidence cannot support a finer vector; a prettier one would be fitting sampling error.
+- **No muscularity ceiling.** Curvature is real, its peak has never been located.
+- **Body-fat percentage triggers nothing.** Consumer estimates carry ±3–5 points. Waist and
+  scale trend only.
+- **Engineering guesses stay labelled** in Settings → provenance. Do not quietly promote a
+  guess to a finding.
+
+## Where things are
+
+    index.html              the whole app
+    test.js                 replays the planner in a VM, asserts the invariants
+    fixtures/v1-log.json    frozen v1 event shapes — the compatibility contract
+    data/                   staging for the overload-data repo (not committed here)
+    .claude/launch.json     local preview on :8931, serving /tmp/ovl-serve
+
+Rule ids in the code (`PRG-*`, `VOL-*`, `SEL-*`, `FAI-*`, `SAF-*`, `PHA-*`, `CAP-01`,
+`ENG-*`, `MIS-01`) are load-bearing: they appear in the user-facing audit trail. Keep them
+stable and keep the comment above each threshold explaining where the number came from.

@@ -376,5 +376,51 @@ ok("a flagged shoulder removes them", ctx.HURT_SHOULDER===0, ctx.HURT_SHOULDER+"
 ok("but the session still happens", ctx.HURT_COUNT>0, ctx.HURT_COUNT+" exercises");
 ok("and it says why", ctx.HURT_NOTE>0);
 
+console.log("\nBACKWARD COMPATIBILITY — a log written by v1 must still replay");
+{
+  const fixture = JSON.parse(fs.readFileSync("fixtures/v1-log.json","utf8"));
+  ctx.FIXTURE = fixture.events;
+  run(`
+    S.events = FIXTURE.slice();
+    rebuild();
+    BC_SESSIONS = S.sessions.length;
+    BC_SETS_D1  = (S.sessions.find(x=>x.date==="2026-08-25")||{sets:[]}).sets.length;
+    BC_VOIDED   = S.voided.size;
+    BC_HAS_99   = S.sessions.some(s=>s.sets.some(x=>x.reps===99));
+    BC_LOAD     = S.ex.lat_pulldown ? S.ex.lat_pulldown.load : null;
+    BC_LOAD_LB  = BC_LOAD==null ? null : Math.round(fromKg(BC_LOAD,"lb"));
+    BC_EX_SESSIONS = S.ex.lat_pulldown ? S.ex.lat_pulldown.sessions : null;
+    BC_LAT_CREDIT = (function(){
+      // fsWeek is THIS week's counter and is correctly zeroed once a week rolls
+      // over, so assert the credit rule against the replayed sets instead.
+      let n=0;
+      for(const sess of S.sessions) for(const st of sess.sets){
+        if(st.warmup) continue;
+        const e=LIBX[st.ex]; if(e) n += (e.contributions.lats||0);
+      }
+      return n;
+    })();
+    BC_BW       = S.bw.length;
+    BC_NOTES    = S.notes.length;
+    BC_IRR      = S.irr.shoulder ? S.irr.shoulder.sev : null;
+    BC_PHASE    = S.settings.phase;
+    BC_DIFFS    = S.diffs.reduce((a,g)=>a+g.list.length,0);
+    BC_SENT     = S.diffs.flatMap(g=>g.list).every(d=>!!d.sentence && !!d.rule);
+  `);
+  ok("both training days replay", ctx.BC_SESSIONS===2, ctx.BC_SESSIONS);
+  ok("day one replays all four sets, warm-up included", ctx.BC_SETS_D1===4, ctx.BC_SETS_D1);
+  ok("the void list is rebuilt", ctx.BC_VOIDED===1, ctx.BC_VOIDED);
+  ok("the corrected 99-rep set never reaches the ledger", ctx.BC_HAS_99===false);
+  ok("the working load survives replay", ctx.BC_LOAD!=null, ctx.BC_LOAD_LB+" lb");
+  ok("per-exercise history survives replay", ctx.BC_EX_SESSIONS===2, ctx.BC_EX_SESSIONS+" sessions");
+  ok("lat volume is still creditable from the replayed sets", ctx.BC_LAT_CREDIT>=3, ctx.BC_LAT_CREDIT+" fractional sets");
+  ok("bodyweight survives", ctx.BC_BW===1, ctx.BC_BW);
+  ok("notes survive", ctx.BC_NOTES===1, ctx.BC_NOTES);
+  ok("an irritation flag survives", ctx.BC_IRR!=null, ctx.BC_IRR);
+  ok("settings replay in order (phase = CUT)", ctx.BC_PHASE==="CUT", ctx.BC_PHASE);
+  ok("the planner produced explained decisions", ctx.BC_DIFFS>0, ctx.BC_DIFFS);
+  ok("every decision still carries a rule and a sentence", ctx.BC_SENT===true);
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail?1:0);

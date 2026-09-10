@@ -1,0 +1,23 @@
+{
+  "_comment": "FROZEN. A snapshot of real event shapes as of app v1 (2026-09-10). Never edit this file to make a test pass — if replaying it no longer produces the expected state, the app has broken backwards compatibility with logs already on disk, and that is the bug. Adding NEW optional fields is fine; renaming or removing anything here is not.",
+  "events": [
+    {"id":1,"type":"settings","ts":1757000000000,"d":"2026-08-03","payload":{"startDate":"2026-08-03","rampUntil":"2026-08-24"}},
+    {"id":2,"type":"settings","ts":1757000001000,"d":"2026-08-03","payload":{"phase":"CUT"}},
+
+    {"id":10,"type":"set","ts":1757100000000,"d":"2026-08-25","payload":{"d":"2026-08-25","ex":"lat_pulldown","load":45.359237,"reps":8,"rir":null,"endpoint":null,"pReps":8,"pLoad":45.359237,"pRir":2,"priorHard":0,"hoursSince":999,"pos":1,"warmup":true,"rom":1,"assisted":0,"calibration":false}},
+    {"id":11,"type":"set","ts":1757100100000,"d":"2026-08-25","payload":{"d":"2026-08-25","ex":"lat_pulldown","load":45.359237,"reps":6,"rir":null,"endpoint":null,"pReps":6,"pLoad":45.359237,"pRir":2,"priorHard":0,"hoursSince":999,"pos":1,"warmup":false,"rom":1,"assisted":0,"calibration":false}},
+    {"id":12,"type":"set","ts":1757100200000,"d":"2026-08-25","payload":{"d":"2026-08-25","ex":"lat_pulldown","load":45.359237,"reps":6,"rir":2,"endpoint":"STOPPED_AT_RIR","pReps":6,"pLoad":45.359237,"pRir":2,"priorHard":1,"hoursSince":999,"pos":1,"warmup":false,"rom":1,"assisted":0,"calibration":false}},
+    {"id":13,"type":"set","ts":1757100300000,"d":"2026-08-25","payload":{"d":"2026-08-25","ex":"cable_lat_raise","load":18.1436948,"reps":10,"rir":2,"endpoint":"STOPPED_AT_RIR","pReps":10,"pLoad":18.1436948,"pRir":1,"priorHard":0,"hoursSince":999,"pos":2,"warmup":false,"rom":1,"assisted":0,"calibration":false}},
+
+    {"id":20,"type":"weight","ts":1757150000000,"d":"2026-08-26","payload":{"d":"2026-08-26","kg":81.6466266}},
+    {"id":21,"type":"note","ts":1757150100000,"d":"2026-08-26","payload":{"d":"2026-08-26","text":"felt good, no issues"}},
+
+    {"id":30,"type":"set","ts":1757250000000,"d":"2026-09-01","payload":{"d":"2026-09-01","ex":"lat_pulldown","load":45.359237,"reps":9,"rir":null,"endpoint":null,"pReps":6,"pLoad":45.359237,"pRir":2,"priorHard":0,"hoursSince":168,"pos":1,"warmup":false,"rom":1,"assisted":0,"calibration":false}},
+    {"id":31,"type":"set","ts":1757250100000,"d":"2026-09-01","payload":{"d":"2026-09-01","ex":"lat_pulldown","load":45.359237,"reps":99,"rir":null,"endpoint":null,"pReps":6,"pLoad":45.359237,"pRir":2,"priorHard":1,"hoursSince":168,"pos":1,"warmup":false,"rom":1,"assisted":0,"calibration":false}},
+    {"id":32,"type":"voidSet","ts":1757250200000,"d":"2026-09-01","payload":{"id":31}},
+    {"id":33,"type":"set","ts":1757250300000,"d":"2026-09-01","payload":{"d":"2026-09-01","ex":"lat_pulldown","load":45.359237,"reps":9,"rir":1,"endpoint":"STOPPED_AT_RIR","pReps":6,"pLoad":45.359237,"pRir":2,"priorHard":1,"hoursSince":168,"pos":1,"warmup":false,"rom":1,"assisted":0,"calibration":false}},
+
+    {"id":40,"type":"irritation","ts":1757260000000,"d":"2026-09-02","payload":{"joint":"shoulder","sev":4,"d":"2026-09-02"}},
+    {"id":41,"type":"sessionEnd","ts":1757260100000,"d":"2026-09-01","payload":{"d":"2026-09-01","rpe":6}}
+  ]
+}
