@@ -221,7 +221,8 @@ td.n{font-family:var(--mono);text-align:right}
    diff log; a plan change that cannot emit a sentence is a thrown error.
    =================================================================== */
 
-if (self !== top) { top.location = self.location; }  // frame-buster: CSP meta cannot set frame-ancestors
+if (self !== top) { top.location = self.location; }
+const BUILD = "2026-09-10 14:14";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -1992,10 +1993,9 @@ function render(){
 function go(v){ VIEW=v; render(); window.scrollTo(0,0); }
 
 function syncBanner(){
-  if(!Sync.configured()) return `<div class="banner warn">Backup isn't connected yet. Everything is on this device only — one Safari data clear and it's gone. <b>Progress → Backup</b>.</div>`;
-  if(Sync.state==="unauthorized") return `<div class="banner bad">Backup is paused — GitHub rejected the token. Sets are still saving locally and will upload once you reconnect in Setup.</div>`;
+  if(Sync.state==="unauthorized") return `<div class="banner bad">Backup is paused — GitHub rejected the token. Sets are still saving locally and will upload once you reconnect below.</div>`;
   const d=Sync.staleDays();
-  if(d>2) return `<div class="banner warn">Last backup was ${Math.floor(d)} days ago. ${Sync.pending.length} entries waiting.</div>`;
+  if(Sync.configured() && d>2) return `<div class="banner warn">Last backup was ${Math.floor(d)} days ago. ${Sync.pending.length} entries waiting.</div>`;
   return "";
 }
 
@@ -2011,7 +2011,6 @@ function renderSession(){
   const date=todayISO(), p=ensurePlan(date);
   let h = syncBanner();
 
-  if(S.settings.firstRun) h += firstRunCard();
   if(S.restricted) h += `<div class="banner warn">You've been training very frequently, or training on a sore joint. This week is capped and the body numbers are hidden. If training is feeling compulsory rather than useful, that's worth talking to someone about.</div>`;
 
   if(p.blocked){
@@ -2042,11 +2041,9 @@ function renderSession(){
   const pinRisk = p.slots.filter(s=>LIBX[s.ex] && !LIBX[s.ex].failSafe);
   if(pinRisk.length){
     h += spotterFresh
-      ? `<div class="banner ok">Spotter or pins set — ${esc(pinRisk.map(s=>s.name.toLowerCase()).join(", "))} can go closer to failure for the next few hours.</div>`
-      : `<div class="card tight"><div class="row"><div class="grow">
-          <b>${esc(listOf(pinRisk.map(s=>s.name)))}</b> today
-          <div class="mini">Held two reps clear of failure unless you've got a spotter or the pins set.</div></div>
-          <button class="btn" data-act="spotter">I have one</button></div></div>`;
+      ? `<p class="mini" style="margin:0 0 8px 4px">Spotter set for the next few hours.</p>`
+      : `<div class="card tight"><div class="row"><div class="grow mini">${esc(listOf(pinRisk.map(s=>s.name)))} stays two reps from failure without a spotter or pins.</div>
+          <button class="btn" data-act="spotter">I have them</button></div></div>`;
   }
 
   const doneCount = p.slots.filter(s=>(logged[s.ex]||[]).filter(x=>!x.warmup).length >= s.sets).length;
@@ -2136,7 +2133,7 @@ function renderSession(){
       </div>
       ${isLast&&s.calibration?`<p class="why">Calibration set: stop where you normally would, tap how many you had left, then keep going to a rep you can't finish and tell me how many extra you got.</p>`:""}
       ${s.needsSeed&&!done.length?`<p class="why">First time on this one — pick a weight you'd get about 15 times, then do 8. I'll work the rest out.</p>`:""}
-      ${s.romSensitive&&s.romCue?`<p class="mini">${esc(s.romCue)}</p>`:""}`;
+      ${s.romSensitive&&s.romCue&&s.needsSeed&&!done.length?`<p class="mini">${esc(s.romCue)}</p>`:""}`;
     } else {
       h+=`<div class="rule"></div><button class="btn wide" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}">Another set</button>`;
     }
@@ -2160,14 +2157,6 @@ function nextTrainingDay(date){
   const days=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   for(let i=1;i<=7;i++){ const d=addDays(date,i); if(S.settings.days.includes(dow(d))) return days[dow(d)]; }
   return null;
-}
-function firstRunCard(){
-  const days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-  return `<div class="card tight spine pri">
-    <div class="row"><div class="grow">
-      <b>Set up for you</b>
-      <div class="mini">RSF · ${S.settings.days.map(d=>days[d]).join(", ")} · cutting. First three weeks are easy on purpose. Change anything in Settings.</div>
-    </div><button class="btn" data-act="dismissfirst">OK</button></div></div>`;
 }
 /* Everything the planner decided, in plain sentences, folded away. The rule
    ids are in there for when you distrust a number — not on the face of it. */
@@ -2212,7 +2201,7 @@ function coachCard(p){
 const LADDER_LABEL = { RAMP:"easing in", BUILD:"adding", HOLD:"steady",
   PROBE:"testing fewer", DELOAD:"recovering", MAINTAIN:"holding" };
 function renderLog(){
-  let h="";
+  let h=syncBanner();
   const exIds=[...new Set(S.events.filter(e=>e.type==="set" && !S.voided.has(e.id)).map(e=>e.payload.ex))];
 
   if(exIds.length){
@@ -2392,6 +2381,7 @@ function renderSetup(){
     <div class="grow"><b>${hid.length} hidden note${hid.length>1?"s":""}</b></div>
     <button class="btn" data-act="unhide">Show again</button></div></div>`;
 
+  h+=`<p class="mini" style="text-align:center;margin-top:18px">build ${BUILD}</p>`;
   $("#v-setup").innerHTML=h;
 }
 
@@ -2799,7 +2789,6 @@ async function handle(a,t,ev){
   }
   case "redflag-yes": await append("redflag",{active:true}); closeSheet(); rebuild(); return go("session");
   case "unblock": await append("redflag",{active:false}); rebuild(); return render();
-  case "dismissfirst": await append("settings",{firstRun:false}); rebuild(); return render();
   case "closesheet": return closeSheet();
   case "confirm-yes": { const cb=CONFIRM_CB; CONFIRM_CB=null; closeSheet(); return cb&&cb(true); }
   case "confirm-no":  { const cb=CONFIRM_CB; CONFIRM_CB=null; closeSheet(); return cb&&cb(false); }

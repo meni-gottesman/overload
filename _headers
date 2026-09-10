@@ -1,0 +1,7 @@
+# Cloudflare Pages headers. The app is one HTML file that changes often, and a
+# device that caches it serves stale instructions — the user saw a banner
+# pointing at a screen that had moved days earlier. Always revalidate.
+/
+  Cache-Control: no-cache, must-revalidate
+/index.html
+  Cache-Control: no-cache, must-revalidate
