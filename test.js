@@ -422,5 +422,32 @@ console.log("\nBACKWARD COMPATIBILITY — a log written by v1 must still replay"
   ok("every decision still carries a rule and a sentence", ctx.BC_SENT===true);
 }
 
+console.log("\nRENDER SMOKE — every view must actually build");
+run(`
+  S.events=[]; S.settings=defaultSettings();
+  S.settings.startDate="2026-06-01"; S.settings.rampUntil="2026-06-02";
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  S.ex={}; S.sessions=[]; S.plans={}; S.planEdits={}; S.voided=new Set();
+  S.bw=[{d:"2026-06-20",kg:81.6}]; S.waist=[]; S.notes=[{d:"2026-06-20",text:"ok"}];
+  S.diffs=[{date:"2026-06-19",list:[{rule:"PRG-02",sentence:"test",field:"load",old:1,new:2}]}];
+  RENDER_ERR = [];
+  for(const [name,fn] of [["session",renderSession],["progress",renderLog],["settings",renderSetup]]){
+    try{ fn(); }catch(e){ RENDER_ERR.push(name+": "+e.message); }
+  }
+  // and again with data that exercises the other branches
+  S.mus.lats.fsWeek=6; S.mus.lats.ladder="DELOAD"; S.restricted=false;
+  S.irr.shoulder={sev:7,at:"2026-06-20",quality:"dull"};
+  for(const [name,fn] of [["session+flag",renderSession],["progress+vol",renderLog],["settings+flag",renderSetup]]){
+    try{ fn(); }catch(e){ RENDER_ERR.push(name+": "+e.message); }
+  }
+  S.restricted=true;
+  for(const [name,fn] of [["session restricted",renderSession],["progress restricted",renderLog]]){
+    try{ fn(); }catch(e){ RENDER_ERR.push(name+": "+e.message); }
+  }
+  RENDER_ERR = RENDER_ERR.join(" || ");
+`);
+ok("every view renders without throwing", ctx.RENDER_ERR==="", ctx.RENDER_ERR);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail?1:0);

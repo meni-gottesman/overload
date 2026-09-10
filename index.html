@@ -156,6 +156,17 @@ label.fld>span{display:block;font:600 12.5px/1.3 var(--sans);color:var(--ink2);m
 .sheet{position:fixed;inset:0;z-index:100;background:rgba(8,11,18,.55);display:flex;align-items:flex-end;justify-content:center}
 .sheet .inner{background:var(--surface);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
 .scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.exrow{
+  display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  padding:0 13px;min-height:52px;margin:0 0 8px;color:var(--ink);font:400 15px/1.35 var(--sans);
+}
+.exrow .mark{color:var(--ink3);font-size:13px;width:14px;flex:0 0 14px}
+.exrow.is-done{background:transparent;border-style:dashed}
+.exrow.is-done .mark{color:var(--good)}
+.exrow.is-done b{font-weight:500;color:var(--ink2)}
+.exrow .num{font-family:var(--mono);white-space:nowrap}
+.chip.sm{font:500 13.5px/1 var(--sans);padding:0 12px;min-height:38px;flex:1}
 summary{cursor:pointer;min-height:var(--tap);display:flex;align-items:center;font-size:15px}
 summary::-webkit-details-marker{color:var(--ink3)}
 details[open] summary{margin-bottom:2px}
@@ -1785,6 +1796,18 @@ let VIEW="session";
 const $ = s=>document.querySelector(s);
 const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let LIVE = null;   // {date, logged:{exId:[...]}} for the in-progress session
+let OPEN_EX = null;  // the one exercise showing its full logging surface
+/* When a lift finishes, open the next unfinished one. Nobody wants to tap a
+   header to find out where they are. */
+function advanceIfComplete(exId){
+  const date=todayISO(), p=ensurePlan(date);
+  const count = ex => S.events.filter(e=>e.type==="set" && !S.voided.has(e.id)
+    && e.payload.d===date && e.payload.ex===ex && !e.payload.warmup).length;
+  const slot = p.slots.find(s=>s.ex===exId);
+  if(!slot || count(exId) < slot.sets) return;
+  const next = p.slots.find(s=>count(s.ex) < s.sets);
+  OPEN_EX = next ? next.ex : null;
+}
 
 function render(){
   $("#boot").classList.add("hide");
@@ -1848,10 +1871,32 @@ function renderSession(){
       <div class="sub">${esc(sessionLine(p))}</div></div>
       <button class="btn" data-act="timecut">Short on time</button></div></div>`;
 
+  /* One card is live at a time; everything else is a single tappable row.
+     Five identical blocks each carrying a 33-option picker was five times the
+     same thing, and the one that mattered was whichever you were standing in
+     front of. Completed lifts collapse to their numbers. */
+  const firstOpen = p.slots.filter(s=>(logged[s.ex]||[]).filter(x=>!x.warmup).length < s.sets)[0];
+  const openId = (OPEN_EX && p.slots.some(s=>s.ex===OPEN_EX)) ? OPEN_EX
+               : (firstOpen ? firstOpen.ex : null);
+
   for(const s of p.slots){
     const e=LIBX[s.ex], all=logged[s.ex]||[];
     const done=all.filter(x=>!x.warmup);
     const complete = done.length>=s.sets;
+    const open = s.ex===openId;
+
+    if(!open){
+      const summary = complete
+        ? `${esc(fmtL(e,done[0].load))} × ${done.map(x=>x.reps).join(", ")}`
+        : done.length ? `${done.length} of ${s.sets} · ${esc(fmtL(e,done[done.length-1].load))}`
+                      : `${s.sets} × ${s.reps}${s.load!=null?" · "+esc(fmtL(e,s.load)):""}`;
+      h+=`<button class="exrow${complete?" is-done":""}" data-act="openex" data-ex="${s.ex}">
+        <span class="mark">${complete?"✓":"○"}</span>
+        <span class="grow"><b>${esc(s.name)}</b><span class="mini"> ${esc(MUSCLE_LABEL[s.muscle])}</span></span>
+        <span class="mini num">${summary}</span></button>`;
+      continue;
+    }
+
     const last = lastPerformance(s.ex, date);
     h+=`<div class="card ${complete?"spine ok":s.isIndex?"spine pri":""}">
       <div class="row"><div class="grow">
@@ -1897,16 +1942,19 @@ function renderSession(){
         <button class="step" data-act="rep+" data-ex="${s.ex}">+</button>
       </div>
       <div class="chips">
-        <button class="chip" data-act="warmup" data-ex="${s.ex}" style="flex:1;font-weight:500">Warm-up</button>
-        <button class="chip" data-act="swap" data-ex="${s.ex}" data-m="${s.muscle}" style="flex:1;font-weight:500">Swap</button>
-        <button class="chip" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}" style="flex:1;font-weight:500">+ set</button>
+        <button class="chip sm" data-act="warmup" data-ex="${s.ex}">Warm-up</button>
+        <button class="chip sm" data-act="swap" data-ex="${s.ex}" data-m="${s.muscle}">Swap</button>
+        <button class="chip sm" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}">+ set</button>
       </div>
       ${isLast&&s.calibration?`<p class="why">Calibration set. Stop where you normally would and tap how many you had left — then keep going until you can't finish a rep, and tell me how many extra you got. It's the only thing that tells "you got stronger" apart from "you under-report".</p>`:""}
       ${s.needsSeed&&!done.length?`<p class="why">First time on this one. Pick a weight you're confident you'd get about 15 times, then do 8. I'll work your real working weight out from that — you'll never be asked to test a max.</p>`:""}
       ${s.romSensitive&&s.romCue?`<p class="mini">${esc(s.romCue)}</p>`:""}`;
+    } else {
+      h+=`<div class="rule"></div><button class="btn wide" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}">Another set</button>`;
     }
     h+=`</div>`;
   }
+
 
   h += coachCard(p);
   h += `<div class="dock"><button class="btn primary wide big" data-act="endsession">Finish session</button></div>`;
@@ -1962,6 +2010,8 @@ function coachCard(p){
    because it is the only signal that moves fast enough to read weekly.
    Body numbers are further down on purpose and never on the home screen.
    ------------------------------------------------------------------ */
+const LADDER_LABEL = { RAMP:"easing in", BUILD:"adding", HOLD:"steady",
+  PROBE:"testing fewer", DELOAD:"recovering", MAINTAIN:"holding" };
 function renderLog(){
   let h="";
   const exIds=[...new Set(S.events.filter(e=>e.type==="set" && !S.voided.has(e.id)).map(e=>e.payload.ex))];
@@ -2219,6 +2269,7 @@ async function handle(a,t,ev){
   const st=S.settings;
   switch(a){
   /* ---- session ---- */
+  case "openex": OPEN_EX = (OPEN_EX===t.dataset.ex) ? null : t.dataset.ex; return render();
   case "swap": {
     const exId=t.dataset.ex, m=t.dataset.m;
     const plan=ensurePlan(todayISO());
@@ -2235,6 +2286,7 @@ async function handle(a,t,ev){
   case "swapto": {
     await ensureStarted();
     await append("planEdit",{d:todayISO(), op:"swap", from:t.dataset.from, to:t.dataset.to, reason:"equipment"});
+    OPEN_EX = t.dataset.to;
     closeSheet(); rebuild(); return render();
   }
   case "addset": {
@@ -2306,7 +2358,8 @@ async function handle(a,t,ev){
     const reps=+document.querySelector(`[data-reps="${CSS.escape(id)}"]`).textContent;
     const commit=async(rir,endpoint,extra)=>{
       await commitSet(id, load, reps, rir, endpoint, extra); closeSheet();
-      Rest.start(id, (LIBX[id]||{}).rest || 120); render();
+      Rest.start(id, (LIBX[id]||{}).rest || 120);
+      advanceIfComplete(id); render();
     };
     const isCalib = t.dataset.calib==="1";
     if(!isLast) return commit(null,null);
