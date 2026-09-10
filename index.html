@@ -628,7 +628,13 @@ function tx(store,mode,fn){
   return idb().then(d=>new Promise((res,rej)=>{
     const t=d.transaction(store,mode), s=t.objectStore(store);
     let out; try{ out=fn(s); }catch(e){ rej(e); return; }
-    t.oncomplete=()=>res(out&&out.result!==undefined?out.result:out);
+    /* An IDBRequest for a MISSING key completes with result === undefined.
+       The old test `out.result !== undefined` therefore fell through and
+       returned the IDBRequest itself — a truthy object. That made
+       `kvGet("gh_pending") || []` yield an object instead of an array, so the
+       first `Sync.pending.find(...)` after connecting threw "not a function"
+       and backup could never start. Check for the PROPERTY, not its value. */
+    t.oncomplete=()=>res(out && typeof out==="object" && ("result" in out) ? out.result : out);
     t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error);
   }));
 }
@@ -1515,11 +1521,14 @@ function buildSlot(e, es, m, sets, ctx, ms, bumpRir, date){
 const Sync = {
   token:null, owner:null, repo:null, pending:[], timer:null, state:"idle", lastOk:null, lastErr:null,
   async init(){
-    this.token = await kvGet("gh_token") || null;
+    const tok = await kvGet("gh_token");
+    this.token = typeof tok === "string" && tok ? tok : null;
     const r = await kvGet("gh_repo");
-    if(r){ this.owner=r.owner; this.repo=r.repo; }
-    this.lastOk = await kvGet("gh_lastok") || null;
-    this.pending = await kvGet("gh_pending") || [];
+    if(r && typeof r.owner === "string" && typeof r.repo === "string"){ this.owner=r.owner; this.repo=r.repo; }
+    const lo = await kvGet("gh_lastok");
+    this.lastOk = typeof lo === "number" ? lo : null;
+    const pend = await kvGet("gh_pending");
+    this.pending = Array.isArray(pend) ? pend : [];
   },
   configured(){ return !!(this.token && this.owner && this.repo); },
   queue(ev){ if(!this.configured()) return; this.pending.push(ev); this.schedule(); },

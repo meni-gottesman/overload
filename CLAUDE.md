@@ -2,7 +2,8 @@
 
 Single-file app: `index.html`. Vanilla JS, zero dependencies, no build step.
 Deployed by Cloudflare Pages on every push to `main` → https://overload-o3a.pages.dev
-Tests: `node test.js` (87 assertions).
+Tests: `node test.js` (93 assertions) **and** `node test-sync.js` (23 assertions, runs the
+real Sync code against a mock GitHub and an in-memory IndexedDB). Both must be green.
 
 ## The one rule that outranks everything
 
@@ -40,7 +41,7 @@ Do not edit the fixture to make it pass — the fixture is the contract.
 
 ## Before any push
 
-1. `node test.js` — every assertion green. A red test is a stop, not a note.
+1. `node test.js` **and** `node test-sync.js` — every assertion green. A red test is a stop.
 2. Actually open the app and use it. Most real defects in this codebase have been found by
    driving the browser, not by reading: a warm-up eating a working set, a mid-session reload
    crashing the view, a set edit showing twice. None of those were visible in the source.
@@ -67,6 +68,7 @@ Do not edit the fixture to make it pass — the fixture is the contract.
 
     index.html              the whole app
     test.js                 replays the planner in a VM, asserts the invariants
+    test-sync.js            drives Sync against a mock GitHub + fake IndexedDB
     fixtures/v1-log.json    frozen v1 event shapes — the compatibility contract
     data/                   staging for the overload-data repo (not committed here)
     .claude/launch.json     local preview on :8931, serving /tmp/ovl-serve
