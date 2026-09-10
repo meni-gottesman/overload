@@ -161,5 +161,45 @@ run(`
 ok("only the qualifying set is credited to lats", Math.abs(ctx.LATS-1.0)<1e-9, ctx.LATS);
 ok("synergist credited fractionally (0.5)", Math.abs(ctx.MIDB-0.5)<1e-9, ctx.MIDB);
 
+console.log("\nVOL-15 / the objective — four tiers, 4:1, no finer");
+run(`
+  WVALS = MUSCLES.map(m=>W_MALE[m]);
+  WDISTINCT = new Set(WVALS).size;
+  WRATIO = Math.max(...WVALS)/Math.min(...WVALS);
+  WTOTAL = W_SUM;
+  LEGAL_OK  = weightsLegal(W_MALE);
+  LEGAL_BAD = weightsLegal(Object.assign({}, W_MALE, {lats:9.0}));
+  HAS_OBLIQUES = W_MALE.obliques > 0;
+  TRAPS_BOTTOM = W_MALE.traps === Math.min(...WVALS);
+`);
+ok("exactly four distinct weights", ctx.WDISTINCT===4, ctx.WDISTINCT);
+ok("top:bottom ratio is 4:1", Math.abs(ctx.WRATIO-4)<1e-9, ctx.WRATIO);
+ok("weights sum to 29.5", Math.abs(ctx.WTOTAL-29.5)<1e-9, ctx.WTOTAL);
+ok("a legal vector passes", ctx.LEGAL_OK===true);
+ok("a steeper-than-4:1 edit is rejected", ctx.LEGAL_BAD===false);
+ok("obliques are no longer zeroed", ctx.HAS_OBLIQUES===true);
+ok("traps sits in the bottom tier", ctx.TRAPS_BOTTOM===true);
+
+console.log("\nVOL-13 — the weekly budget is the authority");
+run(`
+  S.settings=defaultSettings();
+  S.settings.phase="CUT";  CUT_LATS=baseTarget("lats");  CUT_QUAD=baseTarget("quads");
+  S.settings.phase="GAIN"; GROW_LATS=baseTarget("lats");
+  S.settings.phase="MAINTAIN"; MAINT_LATS=baseTarget("lats");
+  NODIRECT = baseTarget("traps");
+  CUT_TOTAL = MUSCLES.reduce((a,m)=>{ S.settings.phase="CUT"; return a+baseTarget(m); },0);
+`);
+ok("a Tier-A group gets more than a Tier-C group", ctx.CUT_LATS>ctx.CUT_QUAD, `${ctx.CUT_LATS} vs ${ctx.CUT_QUAD}`);
+ok("a deficit budgets fewer sets than maintenance", ctx.CUT_LATS<ctx.MAINT_LATS, `${ctx.CUT_LATS} vs ${ctx.MAINT_LATS}`);
+ok("building budgets more than maintenance", ctx.GROW_LATS>ctx.MAINT_LATS, `${ctx.GROW_LATS} vs ${ctx.MAINT_LATS}`);
+ok("SEL-04 groups get zero direct allocation", ctx.NODIRECT===0, ctx.NODIRECT);
+ok("the cut budget lands near 60 fractional sets", Math.abs(ctx.CUT_TOTAL-60)<3, ctx.CUT_TOTAL);
+
+console.log("\nPHA-08 — the waist tripwire is calibrated to tape noise");
+run(`
+  TRIP = K.WAIST_TRIPWIRE_CM; MDC = K.WAIST_MDC_CM;
+`);
+ok("no threshold is finer than the tape's own resolution", ctx.TRIP > ctx.MDC, `trip ${ctx.TRIP} vs MDC ${ctx.MDC}`);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail?1:0);

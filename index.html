@@ -271,23 +271,83 @@ const K = {
   GAIN_BAND: [0.0006, 0.0012],   // +0.06..0.12 %BW/wk
   CUT_BAND: [-0.010, -0.005],    // -0.5..-1.0 %BW/wk
 
+  /* --- allocation (VOL-13..15) --- */
+  BUDGET: { CUT:60, MAINTAIN:75, GAIN:90 },   // VOL-13 total fractional sets/week by phase.
+                            // Key names must match the phase enum exactly — a mismatched key
+                            // falls through to MAINTAIN and silently underfeeds a growth block.
+  MIN_SETS: 4.0,            // VOL-14 weekly fractional floor per group, direct + indirect.
+                            // Judgment (structural balance), not a derived number.
+  MAX_TIER_RATIO: 4.0,      // VOL-15 reject any weight edit steeper than 4:1
+  OBLIQUE_MAX_DIRECT: 3,    // SEL-05 anti-rotation / anti-lateral-flexion only
+
+  /* --- phase clamps (PHA-*) --- */
+  CUT_RATE: [-0.008,-0.005],   // PHA-03 Garthe 2011: 0.7%/wk gave LBM +2.1% vs -0.2% at 1.4%/wk
+  GROW_RATE: [0.0020,0.0035],  // PHA-07 judgment; no primary verified
+  MAX_CUT_WEEKS: 12,           // PHA-06 then a forced 2-week maintain, enforced not suggested
+  PROTEIN_G_PER_KG: 2.2,       // PHA-05 Longland 2016: 2.4 g/kg gave +1.2 kg LM vs +0.1 at 1.2
+  WAIST_TRIPWIRE_CM: 2.5,      // PHA-08 calibrated to instrument noise, NOT to a preference study
+  WAIST_MDC_CM: 1.7,           // MDC95 for a mean of three. Nothing finer may ever be displayed.
+  REVIEW_DAYS: 84,             // UI-01 12 weeks. Eight weeks of direct shoulder work buys about a
+                               // millimetre of thickness against 1.7 cm of tape noise.
+
   /* --- objective --- */
   G_COEF: 1.68,             // g(V)=1.68*sqrt(V) percent hypertrophy over a block
   CALIB_DAYS: 21,           // PRG-10
   RIR_BIAS_INIT: 1.0, RIR_BIAS_LR: 0.3, // PRG-09
 };
 
-/* Visual-impact weights. JUDGMENT, not evidence — no study in the base
-   measured appearance. Seeded from the male-attractiveness silhouette
-   literature, overridden by 12 pairwise comparisons at onboarding. */
-const W_MALE = { lats:3.0, delts_side:3.0, chest:2.5, triceps:2.5, quads:2.0, glutes:2.0,
-  biceps:2.0, hamstrings:1.5, mid_back:1.5, delts_rear:1.5, calves:1.5, abs:1.5,
-  forearms:1.0, traps:1.0, delts_front:0.5 };
+/* ============ THE OBJECTIVE: attractiveness, not bodybuilding ==========
+   FOUR TIERS, NOT SIXTEEN NUMBERS, capped at 4:1 top-to-bottom.
+
+   Why so blunt: exactly one study has ever asked women about individual
+   muscle groups (Durkee 2019, n=503). Thirteen of its fourteen muscles fall
+   inside a 1.00-point band on a 7-point scale while individual raters
+   disagreed by 1.17-1.54 SD — rater heterogeneity exceeds the entire
+   between-muscle range. Shrinking toward uniform is the correct response to
+   that much noise; a finely-ranked vector fits one small study's sampling error.
+
+   And the item everyone misreads: Durkee asks "How do you find the [MUSCLE]
+   most attractive?", anchored 1 = not muscled to 7 = highly muscled. That is
+   an IDEAL POINT — the preferred LEVEL of development — not how much the
+   muscle contributes to attractiveness. Ranking muscles by it is a category
+   error. Only two statements survive: traps is the single group below the
+   scale's middle (3.04, and 0.84 clear of the next lowest), and the other
+   thirteen are not distinguishable from each other.
+
+   NO MUSCULARITY CEILING SHIPS. Sell 2017 tested quadratic strength terms and
+   found no significant one in any sample. Ridley 2022 states outright that it
+   could not resolve what happens above 75 kg of skeletal muscle. Aich 2026 —
+   the best-powered test that exists — fits a vertex near 2.6 SD, outside its
+   own +/-2 SD stimulus range and outside almost all human variation.
+   Curvature is real; nobody has located the peak. So the concavity lives on
+   the volume->outcome mapping, g(V)=1.68*sqrt(V), and never on a stop.
+   ===================================================================== */
+const TIER_A = 3.0, TIER_B = 2.0, TIER_C = 1.25, TIER_D = 0.75;
+const W_MALE = {
+  // Tier A — the upper-torso block. The one verified linear gradient here is
+  // block-level and does NOT decompose per muscle, so these are equal rather
+  // than falsely ranked against each other.
+  lats:TIER_A, delts_side:TIER_A, chest:TIER_A,
+  // Tier B — the undifferentiated band. Nothing separates these.
+  mid_back:TIER_B, delts_rear:TIER_B, biceps:TIER_B, triceps:TIER_B,
+  forearms:TIER_B, abs:TIER_B, glutes:TIER_B,
+  // Tier C — recovery-cost rationing against a 4-day budget, NOT a preference
+  // call: female raters showed no upper-vs-lower-body difference (p = .361).
+  quads:TIER_C, hamstrings:TIER_C, calves:TIER_C, obliques:TIER_C,
+  // Tier D — traps is the one genuine per-muscle signal in the literature, and
+  // nearly inert in practice: rows, carries and pressing pay both indirectly.
+  traps:TIER_D, delts_front:TIER_D,
+};
+const W_SUM = Object.values(W_MALE).reduce((a,b)=>a+b,0);   // 29.5
 const MUSCLES = Object.keys(W_MALE);
+const TIER_OF = m => W_MALE[m]===TIER_A?"A":W_MALE[m]===TIER_B?"B":W_MALE[m]===TIER_C?"C":"D";
+/* SEL-04: no DIRECT allocation. Both clear the weekly floor on indirect credit
+   from rows, deadlifts, carries and overhead pressing. */
+const NO_DIRECT = new Set(["traps","delts_front"]);
 const MUSCLE_LABEL = { lats:"Lats", delts_side:"Side delts", chest:"Chest", triceps:"Triceps",
   quads:"Quads", glutes:"Glutes", biceps:"Biceps", hamstrings:"Hamstrings", mid_back:"Mid back",
   delts_rear:"Rear delts", calves:"Calves", abs:"Abs", forearms:"Forearms", traps:"Traps",
-  delts_front:"Front delts" };
+  delts_front:"Front delts", obliques:"Obliques" };
 const JOINTS = ["shoulder","lumbopelvic","knee","elbow","wrist_hand","hip"];
 
 const RED_FLAGS = [
@@ -361,13 +421,13 @@ ex("cable_lat_raise","Cable lateral raise","lat_raise","isolation",{delts_side:1
 ex("db_lat_raise","Dumbbell lateral raise","lat_raise","isolation",{delts_side:1,traps:0.5},"dumbbell_pair",
    {perSide:true,equip:["dumbbells"],stability:1,failRisk:0,joints:{shoulder:1},band:[10,16],setup:25}),
 ex("db_shoulder_press","Seated dumbbell shoulder press","vert_press","ub_compound",{delts_front:1,delts_side:0.5,triceps:0.5},"dumbbell_pair",
-   {perSide:true,equip:["dumbbells","adjustable_bench"],stability:1,failRisk:1,joints:{shoulder:1,elbow:1},index:"delts_front",setup:55}),
+   {perSide:true,equip:["dumbbells","adjustable_bench"],stability:1,failRisk:1,joints:{shoulder:1,elbow:1},setup:55}),
 ex("cable_rear_delt","Rear-delt cable crossover","rear_delt","isolation",{delts_rear:1,mid_back:0.5},"cable_stack",
    {equip:["cable"],stability:1,failRisk:0,joints:{shoulder:0},index:"delts_rear",band:[12,18],setup:40}),
 ex("reverse_pec_deck","Reverse pec deck","rear_delt","isolation",{delts_rear:1,mid_back:0.5},"machine_stack",
    {equip:["machine_pec_deck"],stability:0,failRisk:0,joints:{shoulder:0},band:[12,18],setup:30}),
 ex("db_shrug","Dumbbell shrug","shrug","isolation",{traps:1},"dumbbell_pair",
-   {perSide:true,equip:["dumbbells"],stability:0,failRisk:0,joints:{shoulder:0},index:"traps",band:[10,15],setup:25}),
+   {perSide:true,equip:["dumbbells"],stability:0,failRisk:0,joints:{shoulder:0},band:[10,15],setup:25}),
 // ---- arms ----
 ex("oh_cable_tri","Overhead cable triceps extension","tri_ext","isolation",{triceps:1,triceps_long:1},"cable_stack",
    {equip:["cable"],stability:1,failRisk:0,joints:{elbow:1,shoulder:0},index:"triceps",lengthened:"high",
@@ -418,8 +478,16 @@ ex("ab_wheel","Ab wheel rollout","anti_ext","isolation",{abs:1},"bodyweight",
    {equip:["ab_wheel"],stability:2,failRisk:0,joints:{lumbopelvic:1,shoulder:0},index:"abs",lengthened:"high",band:[8,14],setup:20}),
 ex("cable_crunch","Cable crunch","trunk_flex","isolation",{abs:1},"cable_stack",
    {equip:["cable"],stability:0,failRisk:0,joints:{lumbopelvic:0},band:[10,16],setup:35}),
-ex("pallof","Pallof press","anti_rot","isolation",{abs:0.5},"cable_stack",
-   {equip:["cable"],stability:1,failRisk:0,joints:{lumbopelvic:0},band:[10,15],setup:35}),
+ex("pallof","Pallof press","anti_rot","isolation",{obliques:1,abs:0.5},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{lumbopelvic:0},index:"obliques",band:[10,15],setup:35}),
+// SEL-05: anti-rotation and anti-lateral-flexion only. No LOADED side flexion.
+// The old hard zero on obliques rested on "oblique work widens the waist",
+// which is unsourced in BOTH directions — no loading study supports it, and the
+// abdominal-training trials that exist report waist circumference going DOWN.
+// Zeroing the top-ranked group in the only per-muscle dataset on an unsourced
+// premise is indefensible, so it ships at Tier C with a waist tripwire instead.
+ex("suitcase_carry","Suitcase carry","anti_lat_flex","isolation",{obliques:1,forearms:0.5,traps:0.5},"dumbbell_pair",
+   {equip:["dumbbells"],stability:1,failRisk:0,joints:{lumbopelvic:0,wrist_hand:1},band:[10,15],setup:25}),
 ];
 const LIBX = Object.fromEntries(LIB.map(e=>[e.id,e]));
 
@@ -589,7 +657,8 @@ function dow(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(y,m
 
 /* ============================ STATE ================================ */
 const S = { events:[], settings:null, ex:{}, mus:{}, irr:{}, sessions:[], bw:[], photos:[],
-            diffs:[], plans:{}, redflag:false, calibLast:null, restricted:false };
+            waist:[], diffs:[], plans:{}, redflag:false, calibLast:null, restricted:false,
+            phaseSince:null };
 
 function defaultSettings(){
   return { onboarded:false, unit:"lb", gym:JSON.parse(JSON.stringify(RSF_DEFAULT_GYM)),
@@ -618,20 +687,29 @@ function emit(list, field, oldV, newV, triggerVar, triggerVal, ruleId, sentence)
 
 function rebuild(){
   S.settings = defaultSettings(); S.ex={}; S.mus={}; S.irr={}; S.sessions=[]; S.bw=[];
-  S.photos=[]; S.diffs=[]; S.plans={}; S.redflag=false; S.calibLast=null;
+  S.photos=[]; S.waist=[]; S.diffs=[]; S.plans={}; S.redflag=false; S.calibLast=null; S.phaseSince=null;
   for(const m of MUSCLES) S.mus[m]=newMuscleState();
   for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
 
   const byDate = {};
   for(const ev of S.events){
     const p=ev.payload;
-    if(ev.type==="settings") Object.assign(S.settings, p);
+    if(ev.type==="settings"){
+      if(p.phase && p.phase!==S.settings.phase) S.phaseSince = ev.d;
+      Object.assign(S.settings, p);
+    }
+    else if(ev.type==="waist") S.waist.push({d:p.d, cm:p.cm, site:p.site});
     else if(ev.type==="redflag") S.redflag = !!p.active;
     else if(ev.type==="weight") S.bw.push({d:p.d,kg:p.kg});
     else if(ev.type==="photo") S.photos.push(p);
     else if(ev.type==="irritation"){ S.irr[p.joint]={sev:p.sev,at:p.d,quality:p.quality||null}; }
     else if(ev.type==="set"){ (byDate[p.d]=byDate[p.d]||[]).push(p); }
     else if(ev.type==="planStart"){ (S.plans[p.d]=S.plans[p.d]||{}).status="started"; }
+  }
+  // Ramp-in starts at ~60% of each muscle's budget share and climbs to it,
+  // rather than from a flat number that may already exceed the share.
+  for(const m of MUSCLES){
+    S.mus[m].target = NO_DIRECT.has(m) ? 0 : Math.max(1, Math.round(baseTarget(m)*0.6*2)/2);
   }
   // joint irritation decays 1 point per elapsed calendar day, floor 0
   for(const j of JOINTS){ const r=S.irr[j];
@@ -836,6 +914,32 @@ function weeklyRollover(week){
   const prevWeek = prevWeekOf(week);
   for(const m of MUSCLES){
     const ms=S.mus[m], diffs=[];
+    const base = baseTarget(m);
+    if(NO_DIRECT.has(m)){
+      // SEL-04: no direct sets. Rows, carries, deadlifts and pressing already
+      // pay these fractionally; the floor check below is what watches them.
+      ms.target = 0; ms.ladder = "MAINTAIN";
+    } else if(ms.ladder==="RAMP"){
+      const o=ms.target; ms.target = Math.min(base, ms.target + K.FS_RAMP_STEP);
+      if(ms.target>=base){ ms.ladder="BUILD"; }
+      if(o!==ms.target) emit(diffs,"target",o,ms.target,"ramp",true,"SAF-RAMP",
+        `Ramping ${MUSCLE_LABEL[m].toLowerCase()}: ${r1(o)} → ${r1(ms.target)} sets a week.`);
+    } else {
+      // The ladder may move you around your budget share, never away from it.
+      const clamped = clamp(ms.target, Math.max(0, base-3), base+3);
+      if(Math.abs(clamped-ms.target) > 0.01){
+        const o=ms.target; ms.target=clamped;
+        emit(diffs,"target",r1(o),r1(ms.target),"budget",base,"VOL-13",
+          `${MUSCLE_LABEL[m]} re-anchored to ${r1(base)} sets — that's its share of a ${K.BUDGET[S.settings.phase]||K.BUDGET.MAINTAIN}-set week ${S.settings.phase==="CUT"?"in a deficit":""}.`.replace(/ +/g," "));
+      }
+    }
+    // VOL-14: floor on TOTAL weekly credit, direct plus indirect. This is what
+    // keeps a Tier-D group from disappearing entirely.
+    if(ms.fsWeek>0 && ms.fsWeek < K.MIN_SETS && !NO_DIRECT.has(m) && ms.ladder!=="DELOAD"){
+      const o=ms.target; ms.target=Math.max(ms.target, K.MIN_SETS);
+      if(o!==ms.target) emit(diffs,"target",r1(o),r1(ms.target),"floor",K.MIN_SETS,"VOL-14",
+        `${MUSCLE_LABEL[m]} came in under the ${K.MIN_SETS}-set floor — raising it. Structural balance, not appearance.`);
+    }
     const a=indexScore(m,week), b=indexScore(m,prevWeek);
     if(a!=null && b!=null){
       const pd=a-b; ms.pd.push(pd); if(ms.pd.length>8) ms.pd.shift();
@@ -862,12 +966,6 @@ function weeklyRollover(week){
       if(ms.ladder!=="MAINTAIN"){ ms.ladder="MAINTAIN";
         emit(diffs,"ladder","*","MAINTAIN","phase","CUT","VOL-08",
           `You're cutting — holding ${MUSCLE_LABEL[m].toLowerCase()} at ${r1(ms.target)} sets rather than chasing more.`); }
-    }
-    else if(ms.ladder==="RAMP"){
-      const o=ms.target; ms.target=Math.min(K.FS_DEFAULT, ms.target+K.FS_RAMP_STEP);
-      if(ms.target>=K.FS_DEFAULT) ms.ladder="BUILD";
-      emit(diffs,"target",o,ms.target,"ramp",true,"SAF-RAMP",
-        `Ramping ${MUSCLE_LABEL[m].toLowerCase()}: ${r1(o)} → ${r1(ms.target)} sets a week.`);
     }
     else if(roll3 >= K.ROLL3_UP && ms.weeksAt>=2 && irrMax<4){             // VOL-06
       if(ms.target+K.FS_UP > K.FS_SOFT_CEIL && !S.settings.unlockHighVolume){
@@ -909,6 +1007,31 @@ function weeklyRollover(week){
     ms.weeksAt += 1; ms.fsWeek=0; ms.doneWeek=0; ms.failWeek=0;
     if(diffs.length) S.diffs.push({date:week, list:diffs, weekly:true});
   }
+}
+/* ===== VOL-13/14/15 — the weekly set budget is the authority ==========
+   Per-muscle targets are DERIVED from a phase-dependent total budget and the
+   weight vector, not laddered independently. The ladder still moves a muscle
+   around its share, but it can no longer quietly inflate the whole week: the
+   budget is what a 4-day schedule can actually recover from, and in a deficit
+   it is smaller because added volume there does not buy hypertrophy, it buys
+   fatigue (Murphy & Koehler 2022, lean-mass ES = -0.57 vs control). */
+function weightsOf(){ return (S.settings && S.settings.w) || W_MALE; }
+function directWeightSum(){ const w=weightsOf();
+  return MUSCLES.filter(m=>!NO_DIRECT.has(m)).reduce((a,m)=>a+(w[m]||0),0); }
+function baseTarget(m){
+  if(NO_DIRECT.has(m)) return 0;                                   // SEL-04
+  const B = K.BUDGET[S.settings.phase] || K.BUDGET.MAINTAIN;
+  const w = weightsOf(), den = directWeightSum() || 1;
+  return Math.round((B*(w[m]||0)/den)*2)/2;                        // to the nearest half set
+}
+/* VOL-15: the evidence resolves four tiers, so refuse any edit steeper than
+   4:1 or carrying more than four distinct values. A finer vector is a claim
+   this literature cannot support. */
+function weightsLegal(w){
+  const vals = MUSCLES.map(m=>w[m]||0).filter(v=>v>0);
+  if(!vals.length) return false;
+  const hi=Math.max(...vals), lo=Math.min(...vals);
+  return (hi/lo) <= K.MAX_TIER_RATIO + 1e-9 && new Set(vals).size <= 4;
 }
 function prevWeekOf(w){ const [y,n]=w.split("-W").map(Number);
   return n>1 ? y+"-W"+String(n-1).padStart(2,"0") : (y-1)+"-W52"; }
@@ -952,6 +1075,71 @@ function bwTrend(){
   const pctWk = (slope!=null && cur.ew) ? (slope*7)/cur.ew : null;
   return { ew:cur.ew, last:cur.kg, lastDate:cur.d, slopeKgWk:slope!=null?slope*7:null,
            pctWk, readings14:recent14, enough:recent14>=K.BW_MIN_READINGS, n:series.length };
+}
+
+/* ======================= PHASE MACHINE (PHA-*) =====================
+   Nothing here keys on an estimated body-fat percentage. Consumer BIA and
+   calipers carry +/-3-5 percentage points, which is wider than any band worth
+   defending — "15%" could be 11% or 19%. Everything triggers on waist and
+   scale trend, measured the same way each time.
+   =================================================================== */
+function waistStats(){
+  if(!S.waist.length) return null;
+  const rows=[...S.waist].sort((a,b)=>a.d<b.d?-1:1), today=todayISO();
+  const med = arr => { if(!arr.length) return null;
+    const v=arr.map(x=>x.cm).sort((a,b)=>a-b); const h=v.length>>1;
+    return v.length%2 ? v[h] : (v[h-1]+v[h])/2; };
+  const win28 = rows.filter(r=>daysBetween(r.d,today)<28);
+  const win90 = rows.filter(r=>daysBetween(r.d,today)<90);
+  return { latest: rows[rows.length-1], median28: med(win28),
+           min90: win90.length ? Math.min(...win90.map(r=>r.cm)) : null, n: rows.length };
+}
+function weeksInPhase(){
+  const since = S.phaseSince || (S.settings && S.settings.startDate);
+  return since ? Math.floor(daysBetween(since, todayISO())/7) : 0;
+}
+/* Returns the coaching call, or null when the data cannot support one. */
+function phaseAdvice(){
+  const st=S.settings, t=bwTrend(), w=waistStats(), wk=weeksInPhase();
+  const out=[];
+
+  // PHA-08 the leanness-first branch. Fires on a measurable, and cuts CALORIES,
+  // never volume. Threshold is calibrated to instrument noise (MDC95 ~1.7 cm
+  // for a mean of three), not to any preference study. Labelled judgment.
+  if(w && w.median28!=null && w.min90!=null && w.median28 > w.min90 + K.WAIST_TRIPWIRE_CM && st.phase!=="CUT"){
+    out.push({rule:"PHA-08", kind:"warn",
+      text:`Your 4-week waist median is ${r1(w.median28-w.min90)} cm above your 90-day low. That's past the ${K.WAIST_TRIPWIRE_CM} cm tripwire, so this is a food decision, not a training one — sets stay where they are.`});
+  }
+  // PHA-06 hard stop on a long deficit. Enforced, not suggested.
+  if(st.phase==="CUT" && wk >= K.MAX_CUT_WEEKS){
+    out.push({rule:"PHA-06", kind:"bad",
+      text:`${wk} straight weeks in a deficit. Two weeks at maintenance now — this one isn't a suggestion.`});
+  }
+  // PHA-03 / PHA-07 rate clamps
+  if(t && t.enough && t.pctWk!=null){
+    const [lo,hi] = st.phase==="CUT" ? K.CUT_RATE : st.phase==="GAIN" ? K.GROW_RATE : [null,null];
+    if(lo!=null){
+      if(t.pctWk < lo) out.push({rule:st.phase==="CUT"?"PHA-03":"PHA-07", kind:"warn",
+        text: st.phase==="CUT"
+          ? `You're losing ${Math.abs(t.pctWk*100).toFixed(2)}% a week. Above 0.8% the lean mass starts going with it — Garthe measured +2.1% lean at 0.7%/wk against −0.2% at 1.4%. Eat a bit more.`
+          : `Gaining slower than 0.20% a week. Add about 200 kcal.`});
+      else if(t.pctWk > hi) out.push({rule:st.phase==="CUT"?"PHA-03":"PHA-07", kind:"warn",
+        text: st.phase==="CUT"
+          ? `You're losing ${Math.abs(t.pctWk*100).toFixed(2)}% a week — slower than the 0.5–0.8% band.`
+          : `Gaining faster than 0.35% a week. That's mostly fat now; pull back about 200 kcal.`});
+    }
+  }
+  // PHA-02 the standing call. Deliberately worded as a decision he makes, not
+  // a number the app asserts, because his body-fat figure cannot be trusted to
+  // +/-3-5 points and the whole recommendation turns on it.
+  if(st.phase==="CUT" && wk<K.MAX_CUT_WEEKS){
+    out.push({rule:"PHA-02", kind:"info",
+      text:`Worth deciding soon: when female raters adjusted male bodies to the most attractive version, they stopped at about 16% body fat — roughly where you already are. Meanwhile a deficit measurably blunts muscle gain (lean-mass effect size −0.57 vs eating at maintenance). If your waist is where you want it, the higher-return lever from here is eating at maintenance and building, not cutting further. Your call — switch phase in Setup.`});
+  }
+  // PHA-05 protein floor
+  if(st.bodyKg) out.push({rule:"PHA-05", kind:"info",
+    text:`Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day, every phase. A protein shortfall costs you more than a calorie shortfall does.`});
+  return out;
 }
 
 /* ===================== RESTRICTED MODE (language rules) ============
@@ -1022,6 +1210,7 @@ function buildPlan(date){
     needed[m]=Math.max(1, Math.ceil(eff/K.SESSION_CAP));
     deficit[m]=eff - ms.fsWeek;
     const hrs = ms.lastHard ? daysBetween(ms.lastHard,date)*24 : 999;
+    if(NO_DIRECT.has(m)) continue;                                  // SEL-04
     if(hrs>=K.SPACING_H && ms.doneWeek<needed[m] && deficit[m]>0) eligible.push(m);
   }
   let bumpRir=0, setScale=1;
@@ -1072,6 +1261,7 @@ function buildPlan(date){
     const eff = ms.ladder==="DELOAD" ? target*K.DELOAD_SET_MULT
               : ms.tier==="MAINTAIN" ? target*0.33 : target;
     let want = Math.max(1, Math.round(Math.min(K.SESSION_CAP, eff/needed[m]) * setScale));
+    if(m==="obliques") want = Math.min(want, K.OBLIQUE_MAX_DIRECT);   // SEL-05
 
     for(const e of chosen){
       if(slots.length >= K.MAX_SLOTS) break;
@@ -1375,6 +1565,12 @@ function renderToday(){
   }
   for(const n of p.notes) h+=`<p class="why"><b>${esc(n.rule)}</b> ${esc(n.text)}</p>`;
 
+  const adv = phaseAdvice();
+  if(adv.length){
+    h+=`<div class="card"><h3>Coach notes</h3>`;
+    for(const a of adv) h+=`<p class="why"><b>${esc(a.rule)}</b> ${esc(a.text)}</p>`;
+    h+=`</div>`;
+  }
   const yd = S.diffs.slice(-6).reverse();
   if(yd.length){
     h+=`<div class="card"><h3>What changed and why</h3>`;
@@ -1488,6 +1684,32 @@ function renderBody(){
     if(!t.enough) h+=`<p class="why"><b>${t.readings14}/8 readings</b> in the last 14 days. Below 8 I won't change anything off bodyweight — acting on 3 noisy readings is worse than not acting.</p>`;
   }
   h+=`</div>`;
+
+  /* Waist is the one circumference that earns its place: it is the numerator
+     of every shape term worth tracking, and unlike shoulder breadth it MOVES —
+     biacromial width is skeletal, deltoid hypertrophy buys 1-2 cm over years,
+     waist moves 10+ cm with body fat. SEL-07: mean of three, one site, forever. */
+  const w=waistStats();
+  h+=`<div class="card"><h3>Waist</h3>
+    <p class="mini">Mean of three measures, same site every time, same time of day. Mixing sites changes the number by centimetres and tells you nothing.</p>
+    <div class="row"><input type="number" step="0.1" inputmode="decimal" id="w1" placeholder="1">
+      <input type="number" step="0.1" inputmode="decimal" id="w2" placeholder="2">
+      <input type="number" step="0.1" inputmode="decimal" id="w3" placeholder="3">
+      <button class="btn primary" data-act="logwaist">Log</button></div>`;
+  if(w && w.median28!=null){
+    h+=`<div class="row" style="margin-top:12px"><div class="grow">
+      <div class="bigload">${r1(w.median28)}<small>cm · 4-week median</small></div>
+      <div class="mini">${w.n} measurement${w.n===1?"":"s"} logged</div></div></div>`;
+    if(w.min90!=null){
+      const d = w.median28 - w.min90;
+      // UI-02: never render a delta below the measurement's own resolution.
+      h+= Math.abs(d) < K.WAIST_MDC_CM
+        ? `<p class="why"><b>No real change</b> Within ${K.WAIST_MDC_CM} cm of your 90-day low, which is the smallest difference a tape can actually resolve. Treating anything smaller as a trend is reading noise.</p>`
+        : `<p class="why"><b>${d>0?"+":""}${r1(d)} cm</b> versus your 90-day low.</p>`;
+    }
+  }
+  h+=`</div>`;
+
   h+=`<div class="card"><h3>Photos</h3>
     <p class="mini">Encrypted on this device before upload. Same pose, same light, same time of day — that's what makes them comparable.</p>`;
   if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
@@ -1496,7 +1718,9 @@ function renderBody(){
   else h+=`<button class="btn wide" data-act="addphoto">Add today's photo</button>
     <div class="ph" id="phgrid" style="margin-top:10px"></div>`;
   h+=`</div>`;
-  h+=`<p class="why">Nothing in the research this app is built on measured how a physique looks. It measured muscle thickness. This app manages your sets and your loads. It can't see your reflection.</p>`;
+  const lastPhoto = S.photos.length ? [...S.photos].sort((a,b)=>a.d<b.d?1:-1)[0].d : null;
+  const dueIn = lastPhoto ? K.REVIEW_DAYS - daysBetween(lastPhoto, todayISO()) : 0;
+  h+=`<p class="why"><b>UI-01</b> Progress here is reviewed every 12 weeks${lastPhoto&&dueIn>0?`, next in ${dueIn} days`:""}. Eight weeks of hard direct work on a shoulder buys about a millimetre of muscle thickness, and a tape cannot resolve less than ${K.WAIST_MDC_CM} cm. A weekly number would be mostly noise — and noise you check daily starts to feel like failure.</p>`;
   $("#v-body").innerHTML=h;
   if(Photo.key) paintPhotos();
 }
@@ -1572,12 +1796,24 @@ function renderSetup(){
     <span class="sub">Allow targets above 20 sets a week</span></label>
     <p class="mini">Above 20 sets per muscle the evidence stops agreeing with itself. Off by default.</p></div>`;
 
+  /* The honesty block. Final copy, shown where the weights are, because a
+     number this soft should never appear without its own error bars. */
+  h+=`<div class="card"><h3>What these numbers are, and what they aren't</h3>
+    <p class="sub">The weights come from a small research literature on what strangers rate as attractive in photographs, CGI models and line drawings of men's bodies. That isn't the same as what happens between two people. When researchers measured actual outcomes instead of ratings — whether men with more muscle end up with more partners — the association is about <b>r = 0.08 to 0.13</b>: somewhere between half a percent and two percent of the variation. It's real. It's small. And it's correlational — nobody has ever measured the same man before and after a training block and rated him twice. That study does not exist.</p>
+    <p class="sub"><b>The per-muscle weights are the weakest part of this app.</b> Exactly one study has ever asked women about individual muscle groups. Thirteen of its fourteen muscles fall inside a one-point band on a seven-point scale, while individual raters disagreed with each other by more than that entire band. Traps is the only group that clearly separates. So this ships four tiers instead of sixteen numbers. Where you see 2.0 next to 1.25, that gap is a judgment about recovery cost and joint health — not a measured preference.</p>
+    <p class="sub"><b>Body fat is an estimate, not a measurement.</b> Whatever your scale or calipers say, the real number is probably within three to five points of it. So nothing in the plan triggers off a body-fat percentage. Everything triggers off waist and scale weight, measured the same way each time.</p>
+    <p class="sub"><b>The body is one input.</b> Nobody has measured what share of attractiveness it carries — this research removes faces by design. Height, face and voice all show up in it and none are things a training plan touches. This app optimises one slice of one channel, and the slice is smaller than the confidence with which it usually gets discussed.</p>
+    <p class="sub"><b>What stays on regardless:</b> no daily weight or waist on the home screen, a hard stop after 12 straight weeks in a deficit, a rate cap of 0.8% of bodyweight a week, no physique imagery, no streaks on eating, and a 12-week review cadence. Those are enforced in the planner, not suggested in the copy.</p></div>`;
+
   h+=`<div class="card"><h3>Provenance</h3><p class="mini">Numbers this app treats as engineering guesses rather than findings, surfaced deliberately:</p>
     <p class="why"><b>SEL-01</b> 9 sets per muscle per session. Not in the peer-reviewed literature — the figure it's derived from exists only as a preprint whose authors say the region is unresolved.</p>
     <p class="why"><b>MIS-01</b> 14/28-day layoff bands. No trial has tested a complete 14-day layoff in trained lifters.</p>
     <p class="why"><b>PRG-08</b> 2–10% load steps. ACSM committee consensus, not a trial.</p>
     <p class="why"><b>κ, ψ</b> Fatigue priors, frozen until 40 observations. Currently priors, not estimates.</p>
-    <p class="why"><b>Visual weights</b> Judgment. Not one study in the evidence base measured appearance — they measured muscle thickness.</p></div>`;
+    <p class="why"><b>Visual weights</b> Four tiers, mostly judgment. The one per-muscle study asks an <i>ideal-point</i> question ("how muscled do you find X most attractive?"), which is a preferred level, not an importance ranking — reading it as a ranking is a category error, and it is why this vector is deliberately flat.</p>
+    <p class="why"><b>No muscularity ceiling</b> Curvature is real but nobody has located the peak: the best-powered test fits a vertex outside its own stimulus range, and the one study that tested a quadratic strength term found none significant. So diminishing returns live on the volume curve, never as a stop.</p>
+    <p class="why"><b>PHA-08</b> The 2.5 cm waist tripwire is calibrated to tape noise, not to any preference study.</p>
+    <p class="why"><b>Deleted as unverifiable</b> A 13-14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, and "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p></div>`;
   $("#v-setup").innerHTML=h;
 }
 
@@ -1755,6 +1991,13 @@ async function handle(a,t,ev){
   /* ---- body ---- */
   case "logbw": { const v=+$("#bwin").value; if(!v) return;
     await append("weight",{d:todayISO(), kg:toKg(v,u())}); rebuild(); return render(); }
+  case "logwaist": {
+    const v=[+$("#w1").value, +$("#w2").value, +$("#w3").value].filter(x=>x>0);
+    if(v.length<3) return toast("All three measures — a single reading is noise.");
+    const cm = v.reduce((a,b)=>a+b,0)/3;
+    await append("waist",{d:todayISO(), cm:Math.round(cm*10)/10, site:"umbilical"});
+    rebuild(); return render();
+  }
   case "unlockphotos": { const p=$("#pp").value; if(!p) return;
     await Photo.unlock(p); if(Sync.configured()) try{ await Sync.putFile("photos/DECRYPT.md", DECRYPT_MD, "how to decrypt without this app"); }catch(e){}
     return render(); }
@@ -1875,10 +2118,23 @@ async function doExport(){
 }
 
 async function finishOnboard(){
+  /* VOL-15: the pairwise answers REORDER muscles between tiers; they never
+     produce a continuous vector. The evidence resolves four tiers and a 4:1
+     ratio — a finely-graded weight would be fitting one small study's
+     sampling error to twelve taps. Tier SIZES are fixed; only membership moves,
+     and only by one tier, so a run of taps cannot invert the evidence. */
   const w={...W_MALE};
-  for(const [m,n] of Object.entries(OB.wins)) w[m]=Math.max(0.2, (w[m]||1)*(1+0.35*n));
-  const ranked=Object.entries(w).sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
-  const tier={}; ranked.forEach((m,i)=>tier[m]= i<3?"PRIORITY" : i>=ranked.length-3?"MAINTAIN":"STANDARD");
+  const score = m => (W_MALE[m]||0) + 0.30*(OB.wins[m]||0);
+  const movable = MUSCLES.filter(m=>!NO_DIRECT.has(m));
+  const ranked = movable.sort((a,b)=>score(b)-score(a));
+  const SIZES=[3,7,4], VALS=[TIER_A,TIER_B,TIER_C];
+  let i=0;
+  VALS.forEach((v,k)=>{ for(let j=0;j<SIZES[k] && i<ranked.length;j++,i++) w[ranked[i]]=v; });
+  for(;i<ranked.length;i++) w[ranked[i]]=TIER_C;
+  for(const m of NO_DIRECT) w[m]=TIER_D;
+  if(!weightsLegal(w)) Object.assign(w, W_MALE);   // refuse anything steeper than 4:1
+  const tier={}; ranked.forEach((m,idx)=>tier[m]= idx<3?"PRIORITY" : idx>=ranked.length-4?"MAINTAIN":"STANDARD");
+  for(const m of NO_DIRECT) tier[m]="MAINTAIN";
   const indexLift={};
   for(const m of MUSCLES){ const e=LIB.find(x=>x.index===m); if(e) indexLift[m]=e.id; }
   const settings={ onboarded:true, unit:OB.gym.unit, gym:OB.gym, days:OB.days||[1,2,4,5],
