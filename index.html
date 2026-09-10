@@ -1,0 +1,1916 @@
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta name="theme-color" content="#f2f4f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c0f16" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Overload">
+<title>Overload</title>
+<style>
+/* ---------------------------------------------------------------
+   Design tokens. Deliberately NO webfonts: this page holds a
+   write-capable GitHub token, and every external subresource is an
+   RCE / exfiltration surface. System stacks only. See SEC note in JS.
+   --------------------------------------------------------------- */
+:root{
+  --ground:#f2f4f9; --surface:#ffffff; --sunken:#e9edf5;
+  --ink:#151a26; --ink2:#5a6478; --ink3:#8b94a7;
+  --line:#dde3ee; --line2:#c9d2e2;
+  --accent:#2f5bd0; --accent-ink:#ffffff;
+  --good:#0f7a51; --warn:#8a5d0c; --bad:#c8323d;
+  --good-bg:#e6f4ee; --warn-bg:#faf1dd; --bad-bg:#fbeaec;
+  --serif:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,'Times New Roman',serif;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --tap:44px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0c0f16; --surface:#141924; --sunken:#1b2130;
+    --ink:#e7ebf3; --ink2:#9aa4b8; --ink3:#6b7488;
+    --line:#232b3b; --line2:#333d52;
+    --accent:#6d92e8; --accent-ink:#0c0f16;
+    --good:#4cc08a; --warn:#d9a83f; --bad:#e8737f;
+    --good-bg:#12251d; --warn-bg:#241f12; --bad-bg:#2a1519;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0c0f16; --surface:#141924; --sunken:#1b2130;
+  --ink:#e7ebf3; --ink2:#9aa4b8; --ink3:#6b7488;
+  --line:#232b3b; --line2:#333d52;
+  --accent:#6d92e8; --accent-ink:#0c0f16;
+  --good:#4cc08a; --warn:#d9a83f; --bad:#e8737f;
+  --good-bg:#12251d; --warn-bg:#241f12; --bad-bg:#2a1519;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--ground); color:var(--ink);
+  font:400 16px/1.5 var(--sans);
+  -webkit-text-size-adjust:100%;
+  padding-bottom:calc(64px + env(safe-area-inset-bottom));
+  overscroll-behavior-y:none;
+}
+h1,h2,h3{font-family:var(--serif);font-weight:600;margin:0;letter-spacing:-.01em}
+h1{font-size:26px} h2{font-size:20px} h3{font-size:17px}
+p{margin:0 0 10px}
+a{color:var(--accent)}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* --- chrome --- */
+.top{
+  position:sticky;top:0;z-index:40;background:var(--ground);
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+  border-bottom:1px solid var(--line);
+  display:flex;align-items:baseline;gap:10px;
+}
+.top .date{margin-left:auto;font:500 12px/1 var(--mono);color:var(--ink3);letter-spacing:.04em;text-transform:uppercase}
+main{padding:14px 16px 24px;max-width:760px;margin:0 auto}
+.view{display:none} .view.on{display:block}
+
+/* --- tab bar --- */
+nav{
+  position:fixed;left:0;right:0;bottom:0;z-index:50;
+  background:var(--surface);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);
+  display:grid;grid-template-columns:repeat(5,1fr);
+}
+nav button{
+  appearance:none;border:0;background:none;color:var(--ink3);
+  font:500 11px/1 var(--sans);letter-spacing:.02em;
+  min-height:var(--tap);padding:9px 2px 10px;cursor:pointer;
+  display:flex;flex-direction:column;align-items:center;gap:5px;
+}
+nav button .g{font-size:17px;line-height:1}
+nav button[aria-current="true"]{color:var(--accent)}
+
+/* --- cards --- */
+.card{
+  background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:14px;margin:0 0 12px;
+}
+.card.tight{padding:11px 13px}
+.card h3{margin-bottom:4px}
+.sub{color:var(--ink2);font-size:13.5px}
+.mini{color:var(--ink3);font-size:12px}
+.rule{height:1px;background:var(--line);margin:12px -14px}
+.stack>*+*{margin-top:10px}
+.row{display:flex;align-items:center;gap:10px}
+.row .grow{flex:1;min-width:0}
+.spine{border-left:3px solid var(--line2);padding-left:11px}
+.spine.pri{border-left-color:var(--accent)}
+.spine.ok{border-left-color:var(--good)}
+.spine.warn{border-left-color:var(--warn)}
+.spine.bad{border-left-color:var(--bad)}
+
+/* --- buttons --- */
+button.btn{
+  appearance:none;font:600 15px/1 var(--sans);cursor:pointer;
+  min-height:var(--tap);padding:0 16px;border-radius:11px;
+  border:1px solid var(--line2);background:var(--surface);color:var(--ink);
+}
+button.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button.btn.wide{width:100%}
+button.btn.big{min-height:58px;font-size:19px;border-radius:13px}
+button.btn:disabled{opacity:.42;cursor:default}
+button.btn.danger{color:var(--bad);border-color:var(--bad)}
+.chips{display:flex;gap:8px;flex-wrap:wrap}
+.chip{
+  appearance:none;cursor:pointer;font:600 15px/1 var(--sans);
+  min-height:var(--tap);min-width:var(--tap);padding:0 15px;border-radius:11px;
+  border:1px solid var(--line2);background:var(--surface);color:var(--ink);
+}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.step{
+  appearance:none;cursor:pointer;width:var(--tap);height:var(--tap);flex:0 0 var(--tap);
+  border-radius:11px;border:1px solid var(--line2);background:var(--surface);
+  color:var(--ink);font:400 24px/1 var(--sans);
+}
+input[type=text],input[type=number],input[type=password],select,textarea{
+  font:400 16px/1.4 var(--sans);color:var(--ink);background:var(--surface);
+  border:1px solid var(--line2);border-radius:10px;padding:11px 12px;width:100%;
+  min-height:var(--tap);
+}
+label.fld{display:block;margin:0 0 10px}
+label.fld>span{display:block;font:600 12.5px/1.3 var(--sans);color:var(--ink2);margin:0 0 5px;letter-spacing:.01em}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* --- set logger --- */
+.setline{display:flex;align-items:center;gap:9px;padding:7px 0}
+.setline .ix{font:600 12px/1 var(--mono);color:var(--ink3);width:20px}
+.setline .lg{font:600 15px/1 var(--mono)}
+.setline .tag{font:600 10.5px/1 var(--sans);letter-spacing:.05em;text-transform:uppercase;padding:4px 6px;border-radius:5px;background:var(--sunken);color:var(--ink2)}
+.bigload{font:600 34px/1 var(--mono);letter-spacing:-.02em}
+.bigload small{font:500 15px/1 var(--sans);color:var(--ink2);margin-left:3px}
+.dock{position:sticky;bottom:calc(8px + env(safe-area-inset-bottom));z-index:30;margin-top:14px}
+
+/* --- misc --- */
+.pill{display:inline-flex;align-items:center;gap:5px;font:600 11px/1 var(--sans);letter-spacing:.04em;text-transform:uppercase;padding:5px 8px;border-radius:6px;background:var(--sunken);color:var(--ink2)}
+.pill.ok{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--bad-bg);color:var(--bad)}
+.why{font-size:13.5px;color:var(--ink2);border-left:3px solid var(--line2);padding-left:10px;margin:7px 0 0}
+.why b{color:var(--ink);font-weight:600}
+.bars{display:flex;align-items:flex-end;gap:3px;height:44px;margin:8px 0 4px}
+.bars i{flex:1;background:var(--accent);border-radius:2px 2px 0 0;min-height:2px;opacity:.75}
+.sheet{position:fixed;inset:0;z-index:100;background:rgba(8,11,18,.55);display:flex;align-items:flex-end;justify-content:center}
+.sheet .inner{background:var(--surface);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
+.scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line)}
+th{font:600 11px/1 var(--sans);text-transform:uppercase;letter-spacing:.05em;color:var(--ink3)}
+td.n{font-family:var(--mono);text-align:right}
+.hide{display:none!important}
+.banner{border-radius:11px;padding:11px 13px;margin:0 0 12px;font-size:14px}
+.banner.bad{background:var(--bad-bg);color:var(--bad);border:1px solid var(--bad)}
+.banner.warn{background:var(--warn-bg);color:var(--warn);border:1px solid var(--warn)}
+.banner.ok{background:var(--good-bg);color:var(--good);border:1px solid var(--good)}
+.ph{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.ph img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:9px;background:var(--sunken)}
+.empty{text-align:center;color:var(--ink3);padding:34px 12px;font-size:14.5px}
+</style>
+<div class="top">
+  <h1 id="ttl">Overload</h1>
+  <span class="date" id="topdate"></span>
+</div>
+
+<main>
+  <div id="boot" class="empty">Loading…</div>
+
+  <section class="view" id="v-today" aria-label="Today"></section>
+  <section class="view" id="v-train" aria-label="Session"></section>
+  <section class="view" id="v-log"   aria-label="Progress"></section>
+  <section class="view" id="v-body"  aria-label="Body"></section>
+  <section class="view" id="v-setup" aria-label="Setup"></section>
+
+  <section class="view" id="v-onb" aria-label="Setup wizard"></section>
+</main>
+
+<nav id="tabs" class="hide">
+  <button data-v="today" aria-current="true"><span class="g">◆</span>Today</button>
+  <button data-v="train"><span class="g">▲</span>Train</button>
+  <button data-v="log"><span class="g">▤</span>Progress</button>
+  <button data-v="body"><span class="g">◑</span>Body</button>
+  <button data-v="setup"><span class="g">⚙</span>Setup</button>
+</nav>
+
+<div id="sheet" class="hide"></div>
+
+<script>
+"use strict";
+/* ===================================================================
+   OVERLOAD — an autoregulated hypertrophy coach.
+   Objective: aesthetics. Deterministic planner. Single file, zero deps.
+
+   SEC: no external subresource of any kind. This page holds a GitHub
+   token with write access to a private repo; a CDN script would run with
+   full same-origin authority over it. CSP connect-src is pinned to
+   api.github.com so script execution alone cannot exfiltrate.
+
+   Every threshold below carries its provenance. Where the number is an
+   engineering guess rather than a literature value it says so, and the
+   in-app audit view surfaces that label. Rules are cited by ID in the
+   diff log; a plan change that cannot emit a sentence is a thrown error.
+   =================================================================== */
+
+if (self !== top) { top.location = self.location; }  // frame-buster: CSP meta cannot set frame-ancestors
+
+/* ============================ CONSTANTS ============================ */
+const K = {
+  /* --- progression (PRG-*) --- */
+  DEADBAND: 1.0,            // PRG-01 ±1 rep. Derived: Halperin between-participant SD 1.45 reps.
+  KAPPA: 0.35,              // reps lost per prior hard set on same group this session. Prior; frozen until n>=40.
+  PSI: 1.2,                 // reps lost at zero recovery, tau 24h. Prior; frozen until n>=40.
+  FATIGUE_FIT_N: 40,
+  UP_STEPS: [[2,0.020],[3,0.035],[1e9,0.050]],     // PRG-02 delta -> +pct
+  DOWN_STEPS: [[-2,-0.05],[-3,-0.07],[-1e9,-0.10]],// PRG-03 delta -> -pct
+  CAP_REL: { lb_compound:0.10, ub_compound:0.05, isolation:0.05 }, // PRG-08 ACSM 2009 "2-10%" — committee consensus, no trial. HEURISTIC.
+  CAP_ABS_LOWER: 5.0, CAP_ABS_UPPER: 2.5,
+  COLDSTART_SESSIONS: 3, COLDSTART_CAP_REL: 0.10,  // 8.3
+  SEED_MULT: 1.12,          // 8.2 Nuzzo 2024: 15-rep load -> 10-rep load ratio ~1.11-1.14.
+  FORCE_JUMP_EXPOSURES: 2,  // PRG-07
+
+  /* --- volume ladder (VOL-*) --- */
+  FS_START: 8.0, FS_DEFAULT: 14.0, FS_RAMP_STEP: 2.0,
+  FS_UP: 1.0, FS_SOFT_CEIL: 20.0, FS_HARD_CEIL: 26.0,
+  QUALIFY_LOAD_FRAC: 0.85,  // VOL-01 a set counts iff load >= 0.85*working AND reps >= band_lo
+  SIGMA_FLOOR: 0.8,         // VOL-03 rep-count test-retest SEM 0.7-1.1
+  ROLL3_UP: 1.5,            // VOL-06 mean z >= 0.5 of user's own noise
+  ROLL3_DELOAD: -3.0,       // VOL-05 mean z <= -1.0
+  CUT_DELOAD_MULT: 1.5,     // PHA-03 -> -4.5 during a cut
+  SHORTFALL_HOLD: 0.85,     // VOL-07 you cannot bank volume you did not do
+  FLAT_WEEKS_PROBE: 8, PROBE_DROP: 2.0, PROBE_WEEKS: 4, PROBE_MIN_TARGET: 12.0, // VOL-09
+  DELOAD_SET_MULT: 0.50, DELOAD_DAYS: 7, DELOAD_RIR: 3, // VOL-10 load HELD, not cut
+
+  /* --- selection (SEL-*) --- */
+  MAX_SLOTS: 7,             // exercises per session. Matches the spec's own day-1 program
+                            // shape (A/B/C, 6-7 slots). Without it, a week joined
+                            // on a Thursday crams 15 muscles into two days and the
+                            // clock is the only brake — which is not a plan, it's a list.
+  MAX_MUSCLES_PER_DAY: 5,
+  SESSION_CAP: 9.0,         // SEL-01 ENGINEERING DEFAULT. Verified absent from peer-reviewed literature; the "11" figure is preprint-only.
+  SPACING_H: 48,            // SEL-03 constant, not a fitted decay
+  ROTATION_BLOCK_WEEKS: 8,  // SEL-04 Baz-Valle 2019: variety costs nothing, helps motivation
+
+  /* --- effort (FAI-*) --- */
+  RIR_COMPOUND: 2, RIR_ISOLATION: 1,   // FAI-01 ACSM 2026 "2-3 RIR"; Refalo 2024 thickness identical to failure
+  REST_COMPOUND: 120, REST_ISOLATION: 90, // FAI-02 Singer 2024: no difference >90s
+  FAILURE_SHARE: 0.25,      // FAI-04 weekly failure sets < 0.25 * weekly target
+  RIR_ASK_MAX_REPS: 15,     // 5.3 Halperin set-length moderator: beta .06 (<=12) vs .47 (>12)
+  RIR_IGNORE_REPS: 20,
+
+  /* --- safety (SAF-*) --- */
+  RAMP_DAYS: 21, RAMP_MIN_RIR: 3, RAMP_MAX_SETS: 2, RAMP_WEEKLY_CAP: 10.0, RAMP_FIRST_FAILURE_SESSION: 7,
+  LAYOFF_SHORT: 14, LAYOFF_LONG: 28,   // MIS-01 GUESS. No trial has tested a 14-day layoff in trained lifters.
+  OUTLIER_LO: 0.5, OUTLIER_HI: 1.5,    // SAF-OUTLIER
+  SCREEN_REASK_DAYS: 180,
+  RESTRICTED_SESSIONS: 6, RESTRICTED_WEEKS: 3, // language rules: behavioural tripwire
+
+  /* --- phase (PHA-*) --- */
+  BW_ALPHA: 0.10, BW_WINDOW_D: 21, BW_MIN_READINGS: 8,
+  GAIN_BAND: [0.0006, 0.0012],   // +0.06..0.12 %BW/wk
+  CUT_BAND: [-0.010, -0.005],    // -0.5..-1.0 %BW/wk
+
+  /* --- objective --- */
+  G_COEF: 1.68,             // g(V)=1.68*sqrt(V) percent hypertrophy over a block
+  CALIB_DAYS: 21,           // PRG-10
+  RIR_BIAS_INIT: 1.0, RIR_BIAS_LR: 0.3, // PRG-09
+};
+
+/* Visual-impact weights. JUDGMENT, not evidence — no study in the base
+   measured appearance. Seeded from the male-attractiveness silhouette
+   literature, overridden by 12 pairwise comparisons at onboarding. */
+const W_MALE = { lats:3.0, delts_side:3.0, chest:2.5, triceps:2.5, quads:2.0, glutes:2.0,
+  biceps:2.0, hamstrings:1.5, mid_back:1.5, delts_rear:1.5, calves:1.5, abs:1.5,
+  forearms:1.0, traps:1.0, delts_front:0.5 };
+const MUSCLES = Object.keys(W_MALE);
+const MUSCLE_LABEL = { lats:"Lats", delts_side:"Side delts", chest:"Chest", triceps:"Triceps",
+  quads:"Quads", glutes:"Glutes", biceps:"Biceps", hamstrings:"Hamstrings", mid_back:"Mid back",
+  delts_rear:"Rear delts", calves:"Calves", abs:"Abs", forearms:"Forearms", traps:"Traps",
+  delts_front:"Front delts" };
+const JOINTS = ["shoulder","lumbopelvic","knee","elbow","wrist_hand","hip"];
+
+const RED_FLAGS = [
+  "Chest pain, pressure, or jaw/arm pain on exertion",
+  "Fainting or nearly fainting",
+  "Unusual breathlessness at low effort",
+  "New or spreading numbness, tingling, or weakness in a limb",
+  "Numbness in the saddle area, or new bladder/bowel trouble",
+  "Unexplained weight loss, or night pain that wakes you",
+  "Fever with back pain",
+  "Swelling in one calf",
+  "A sudden pop followed by loss of function, or a limb you cannot straighten",
+  "Dark or cola-coloured urine after training",
+];
+const BLOCKED_STRING = "Stop training and contact a clinician about this before you train again. This app cannot assess symptoms and will not generate a plan until you confirm a clinician has cleared you.";
+const PED_STRING = "This app does not cover anabolic steroids, SARMs, peptides, or similar compounds — no dosing, cycles, sourcing, or bloodwork. Please speak with a clinician.";
+
+/* ======================= EXERCISE LIBRARY =========================
+   Metadata, not code. contributions are FRACTIONAL sets: 1.0 prime
+   mover, 0.5 meaningful synergist, 0.0 stabiliser (Pelland 2026 model
+   selection). fail_safe=false means a failed rep can pin or drop load
+   on trunk/neck/head -> never prescribed at RIR<=1 without a spotter
+   flag set fresh this session (SAF-PIN).
+   non_working_joint: HARD constraint, three muscles only (SEL-05).
+   Verified (Maeo 2023, PMID 38156065): standing vs seated calf raise
+   gave whole triceps surae +5.6% vs +2.1%, lateral gastroc +12.4% vs
+   +1.7%. Largest exercise-selection effect available, and it is free.
+   ================================================================== */
+function ex(id,name,pattern,cls,contributions,profile,o){
+  o=o||{};
+  return {id,name,pattern,cls,contributions,profile,
+    perSide:!!o.perSide, equip:o.equip||[], failSafe:o.failSafe!==false,
+    stability:o.stability==null?1:o.stability, failRisk:o.failRisk==null?1:o.failRisk,
+    joints:o.joints||{}, shoulderProv:o.shoulderProv||0,
+    lengthened:o.lengthened||"neutral", nwj:o.nwj||null,
+    band:o.band||(cls==="isolation"?[8,14]:[6,10]),
+    rest:o.rest||(cls==="isolation"?K.REST_ISOLATION:K.REST_COMPOUND),
+    romSensitive:!!o.romSensitive, romCue:o.romCue||"", setup:o.setup||45,
+    seed:o.seed||null, index:o.index||null, superset:o.superset||[]};
+}
+const LIB = [
+// ---- chest ----
+ex("bb_bench","Barbell bench press","horiz_press","ub_compound",{chest:1,chest_upper:0.5,delts_front:0.5,triceps:0.5},"barbell",
+   {equip:["barbell","bench","rack"],failSafe:false,stability:2,failRisk:2,joints:{shoulder:1,elbow:1,wrist_hand:1},index:"chest",romSensitive:true,romCue:"bar to the same point on your chest",setup:75}),
+ex("db_incline_30","30° incline dumbbell press","incl_press","ub_compound",{chest:1,chest_upper:1,delts_front:0.5,triceps:0.5},"dumbbell_pair",
+   {perSide:true,equip:["dumbbells","adjustable_bench"],stability:1,joints:{shoulder:1,elbow:1,wrist_hand:1},lengthened:"high",romSensitive:true,romCue:"dumbbells level with the chest at the bottom",seed:{bb_bench:0.31},setup:60}),
+ex("machine_chest_press","Chest press machine","horiz_press","ub_compound",{chest:1,delts_front:0.5,triceps:0.5},"machine_stack",
+   {equip:["machine_chest_press"],stability:0,failRisk:0,joints:{shoulder:1,elbow:1},setup:40}),
+ex("cable_fly_low","Low-to-high cable fly","fly","isolation",{chest:1,chest_upper:0.5},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{shoulder:1},lengthened:"high",band:[10,15],setup:45}),
+ex("pec_deck","Pec deck","fly","isolation",{chest:1},"machine_stack",
+   {equip:["machine_pec_deck"],stability:0,failRisk:0,joints:{shoulder:1},lengthened:"high",band:[10,15],setup:30}),
+// ---- lats / back ----
+ex("lat_pulldown","Lat pulldown","vert_pull","ub_compound",{lats:1,mid_back:0.5,biceps:0.5,delts_rear:0.5},"machine_stack",
+   {equip:["machine_pulldown"],stability:0,failRisk:0,joints:{shoulder:1,elbow:1},index:"lats",lengthened:"high",setup:35}),
+ex("pulldown_neutral","Neutral-grip pulldown","vert_pull","ub_compound",{lats:1,mid_back:0.5,biceps:0.5},"machine_stack",
+   {equip:["machine_pulldown"],stability:0,failRisk:0,joints:{shoulder:0,elbow:1},setup:35}),
+ex("assisted_pullup","Assisted pull-up (Gravitron)","vert_pull","ub_compound",{lats:1,mid_back:0.5,biceps:0.5},"assisted",
+   {equip:["gravitron"],stability:1,failRisk:0,joints:{shoulder:1,elbow:1},lengthened:"high",setup:40}),
+ex("csr_row","Chest-supported row","horiz_pull","ub_compound",{mid_back:1,lats:0.5,delts_rear:0.5,biceps:0.5,traps:0.5},"plate_machine",
+   {equip:["machine_csrow"],stability:0,failRisk:0,joints:{shoulder:0,elbow:1},index:"mid_back",setup:45,superset:["chest","quads"]}),
+ex("cable_row","Seated cable row","horiz_pull","ub_compound",{mid_back:1,lats:0.5,delts_rear:0.5,biceps:0.5},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{shoulder:0,elbow:1,lumbopelvic:1},setup:40}),
+ex("db_row","One-arm dumbbell row","horiz_pull","ub_compound",{lats:1,mid_back:1,biceps:0.5,traps:0.5},"dumbbell_pair",
+   {equip:["dumbbells","bench"],stability:1,joints:{shoulder:0,elbow:1,lumbopelvic:1},setup:50}),
+ex("straight_arm_pd","Straight-arm pulldown","pullover","isolation",{lats:1},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{shoulder:1},lengthened:"high",band:[10,15],setup:35}),
+// ---- delts ----
+ex("cable_lat_raise","Cable lateral raise","lat_raise","isolation",{delts_side:1},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{shoulder:1},index:"delts_side",shoulderProv:0,lengthened:"high",band:[10,16],setup:35}),
+ex("db_lat_raise","Dumbbell lateral raise","lat_raise","isolation",{delts_side:1,traps:0.5},"dumbbell_pair",
+   {perSide:true,equip:["dumbbells"],stability:1,failRisk:0,joints:{shoulder:1},band:[10,16],setup:25}),
+ex("db_shoulder_press","Seated dumbbell shoulder press","vert_press","ub_compound",{delts_front:1,delts_side:0.5,triceps:0.5},"dumbbell_pair",
+   {perSide:true,equip:["dumbbells","adjustable_bench"],stability:1,failRisk:1,joints:{shoulder:1,elbow:1},index:"delts_front",setup:55}),
+ex("cable_rear_delt","Rear-delt cable crossover","rear_delt","isolation",{delts_rear:1,mid_back:0.5},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{shoulder:0},index:"delts_rear",band:[12,18],setup:40}),
+ex("reverse_pec_deck","Reverse pec deck","rear_delt","isolation",{delts_rear:1,mid_back:0.5},"machine_stack",
+   {equip:["machine_pec_deck"],stability:0,failRisk:0,joints:{shoulder:0},band:[12,18],setup:30}),
+ex("db_shrug","Dumbbell shrug","shrug","isolation",{traps:1},"dumbbell_pair",
+   {perSide:true,equip:["dumbbells"],stability:0,failRisk:0,joints:{shoulder:0},index:"traps",band:[10,15],setup:25}),
+// ---- arms ----
+ex("oh_cable_tri","Overhead cable triceps extension","tri_ext","isolation",{triceps:1,triceps_long:1},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{elbow:1,shoulder:0},index:"triceps",lengthened:"high",
+    nwj:{triceps_long:"flexed"},band:[10,15],setup:45}),
+ex("rope_pushdown","Rope pushdown","tri_ext","isolation",{triceps:1},"cable_stack",
+   {equip:["cable"],stability:0,failRisk:0,joints:{elbow:1},nwj:{triceps_long:"neutral"},band:[10,15],setup:30}),
+ex("db_incline_curl","Incline dumbbell curl","elbow_flex","isolation",{biceps:1,forearms:0.5},"dumbbell_pair",
+   {perSide:true,equip:["dumbbells","adjustable_bench"],stability:1,failRisk:0,joints:{elbow:1},index:"biceps",lengthened:"high",band:[9,14],setup:45}),
+ex("cable_curl","Cable curl","elbow_flex","isolation",{biceps:1,forearms:0.5},"cable_stack",
+   {equip:["cable"],stability:0,failRisk:0,joints:{elbow:1},band:[10,15],setup:30}),
+ex("hammer_curl","Hammer curl","elbow_flex","isolation",{biceps:0.5,forearms:1},"dumbbell_pair",
+   {perSide:true,equip:["dumbbells"],stability:0,failRisk:0,joints:{elbow:1,wrist_hand:1},index:"forearms",band:[10,15],setup:25}),
+// ---- quads ----
+ex("leg_press","Leg press","squat_pattern","lb_compound",{quads:1,glutes:0.5,hamstrings:0.5},"plate_machine",
+   {equip:["machine_leg_press"],stability:0,failRisk:0,joints:{knee:1,hip:1,lumbopelvic:1},index:"quads",lengthened:"high",setup:60}),
+ex("hack_squat","Hack squat","squat_pattern","lb_compound",{quads:1,glutes:0.5},"plate_machine",
+   {equip:["machine_hack"],stability:0,failRisk:1,joints:{knee:1,hip:1,lumbopelvic:1},lengthened:"high",setup:60}),
+ex("bb_squat","Barbell back squat","squat_pattern","lb_compound",{quads:1,glutes:1,hamstrings:0.5,lumbopelvic:0},"barbell",
+   {equip:["barbell","rack"],failSafe:false,stability:2,failRisk:2,joints:{knee:1,hip:1,lumbopelvic:2},romSensitive:true,romCue:"same depth as last time",setup:90}),
+ex("goblet_squat","Goblet squat","squat_pattern","lb_compound",{quads:1,glutes:0.5},"dumbbell_pair",
+   {equip:["dumbbells"],stability:1,failRisk:0,joints:{knee:1,hip:1},setup:35}),
+ex("leg_extension","Leg extension","knee_ext","isolation",{quads:1},"machine_stack",
+   {equip:["machine_leg_ext"],stability:0,failRisk:0,joints:{knee:1},band:[10,15],setup:30}),
+// ---- posterior ----
+ex("seated_leg_curl","Seated leg curl","knee_flex","isolation",{hamstrings:1,hamstrings_biarticular:1},"machine_stack",
+   {equip:["machine_leg_curl_seated"],stability:0,failRisk:0,joints:{knee:1},index:"hamstrings",
+    nwj:{hamstrings_biarticular:"flexed"},lengthened:"high",band:[10,15],setup:35}),
+ex("lying_leg_curl","Lying leg curl","knee_flex","isolation",{hamstrings:1},"machine_stack",
+   {equip:["machine_leg_curl_lying"],stability:0,failRisk:0,joints:{knee:1},nwj:{hamstrings_biarticular:"extended"},band:[10,15],setup:30}),
+ex("rdl","Romanian deadlift","hip_hinge","lb_compound",{hamstrings:1,glutes:1,mid_back:0.5,lumbopelvic:0},"barbell",
+   {equip:["barbell"],failSafe:false,stability:2,failRisk:2,joints:{lumbopelvic:2,hip:1,knee:0},lengthened:"high",romSensitive:true,romCue:"bar to mid-shin, same as last time",setup:70}),
+ex("db_rdl","Dumbbell Romanian deadlift","hip_hinge","lb_compound",{hamstrings:1,glutes:1,mid_back:0.5},"dumbbell_pair",
+   {perSide:true,equip:["dumbbells"],stability:1,failRisk:1,joints:{lumbopelvic:1,hip:1},lengthened:"high",setup:45}),
+ex("hip_thrust","Hip thrust","hip_ext","lb_compound",{glutes:1,hamstrings:0.5},"barbell",
+   {equip:["barbell","bench"],stability:1,failRisk:0,joints:{hip:1,lumbopelvic:1},index:"glutes",setup:80}),
+ex("cable_kickback","Cable glute kickback","hip_ext","isolation",{glutes:1},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{hip:1},band:[12,18],setup:40}),
+ex("back_extension","45° back extension","hip_hinge","isolation",{lumbopelvic:0,glutes:0.5,hamstrings:0.5},"bodyweight",
+   {equip:["machine_back_ext"],stability:1,failRisk:0,joints:{lumbopelvic:1,hip:1},band:[10,15],setup:30}),
+// ---- calves ----
+ex("standing_calf","Standing calf raise","calf","isolation",{calves:1,gastrocnemius:1},"machine_stack",
+   {equip:["machine_calf_standing"],stability:0,failRisk:0,joints:{knee:0},index:"calves",
+    nwj:{gastrocnemius:"extended"},lengthened:"high",band:[10,15],setup:30}),
+ex("seated_calf","Seated calf raise","calf","isolation",{calves:0.5,soleus:1},"plate_machine",
+   {equip:["machine_calf_seated"],stability:0,failRisk:0,joints:{knee:0},nwj:{gastrocnemius:"flexed"},band:[12,18],setup:30}),
+// ---- trunk ----
+ex("ab_wheel","Ab wheel rollout","anti_ext","isolation",{abs:1},"bodyweight",
+   {equip:["ab_wheel"],stability:2,failRisk:0,joints:{lumbopelvic:1,shoulder:0},index:"abs",lengthened:"high",band:[8,14],setup:20}),
+ex("cable_crunch","Cable crunch","trunk_flex","isolation",{abs:1},"cable_stack",
+   {equip:["cable"],stability:0,failRisk:0,joints:{lumbopelvic:0},band:[10,16],setup:35}),
+ex("pallof","Pallof press","anti_rot","isolation",{abs:0.5},"cable_stack",
+   {equip:["cable"],stability:1,failRisk:0,joints:{lumbopelvic:0},band:[10,15],setup:35}),
+];
+const LIBX = Object.fromEntries(LIB.map(e=>[e.id,e]));
+
+/* =================== LOADABLE SET (the load picker) ===============
+   The single highest-value structure in the app. The most-repeated
+   complaint about every adaptive lifting app is prescribing a weight
+   the gym cannot physically make. That is not an algorithm failure,
+   it is a missing data structure. Everything here is in KG canonically;
+   pounds are a display conversion only.
+   ================================================================== */
+const LB = 0.45359237;
+const toKg = (v,u)=> u==="lb" ? v*LB : v;
+const fromKg = (v,u)=> u==="lb" ? v/LB : v;
+
+function subsetSums(plates, maxKg){
+  // plates: [{w:kg per plate, pairs:n}] -> reachable ADDED totals (both sides)
+  let reach = new Set([0]);
+  for(const p of plates){
+    const step = p.w*2, next = new Set(reach);
+    for(let n=1;n<=p.pairs;n++) for(const r of reach){
+      const v = r + step*n; if(v<=maxKg) next.add(Math.round(v*1000)/1000);
+    }
+    reach = next;
+  }
+  return [...reach].sort((a,b)=>a-b);
+}
+/* Per-profile ceilings. A single 400 kg cap let a cable stack offer 880 lb,
+   which is not a weight that exists and makes the picker unusable. */
+const PROFILE_CAP_KG = { barbell:400, plate_machine:500, dumbbell_pair:75,
+  cable_stack:150, machine_stack:180, assisted:150, bodyweight:60 };
+function loadableSet(e, gym){
+  const u = gym.unit, cap = PROFILE_CAP_KG[e.profile] || 200;
+  const key = e.profile;
+  if(key==="barbell"){
+    const bar = toKg(gym.barKg!=null?gym.barKg:fromKg(20,u), "kg");
+    const plates = gym.plates.map(p=>({w:toKg(p.w,u), pairs:p.pairs}));
+    return subsetSums(plates, cap).map(a=>round3(bar+a));
+  }
+  if(key==="dumbbell_pair"){
+    const out=[]; for(const seg of gym.dbSegments){
+      const lo=toKg(seg.lo,u), hi=toKg(seg.hi,u), st=toKg(seg.step,u);
+      if(!(st>0) || !(hi>=lo)) continue;                 // a 0 step would spin forever
+      for(let w=lo; w<=hi+1e-6; w+=st) out.push(round3(w));
+    }
+    return [...new Set(out)].sort((a,b)=>a-b);   // PER HAND
+  }
+  if(key==="cable_stack"||key==="machine_stack"||key==="assisted"){
+    const st=toKg(gym.stackStep,u); if(!(st>0)) return [0];
+    const n=Math.floor(cap/st), out=[];
+    for(let i=1;i<=n;i++) out.push(round3(st*i));
+    if(gym.microplates) { const m=toKg(gym.microKg,u); const ext=[]; for(const v of out){ext.push(round3(v+m));} return [...new Set(out.concat(ext))].sort((a,b)=>a-b); }
+    return out;
+  }
+  if(key==="plate_machine"){
+    const plates = gym.plates.map(p=>({w:toKg(p.w,u), pairs:p.pairs}));
+    return subsetSums(plates, cap);
+  }
+  if(key==="bodyweight"){
+    const st=toKg(gym.stackStep,u); if(!(st>0)) return [0];
+    const out=[0]; for(let i=1;i<=Math.floor(cap/st);i++) out.push(round3(st*i));
+    return out;
+  }
+  return [0];
+}
+const round3=v=>Math.round(v*1000)/1000;
+/* Comparison tolerance in kg. No gym on earth has an increment finer than
+   0.5 kg, so 5 g is far below any real step and far above float noise from
+   the lb<->kg conversion. Using 1e-6 here silently produced "30 lb -> 30 lb"
+   progressions: a set member rounded to 13.608 reads as heavier than an
+   unsnapped 13.6077711, and every downstream decision inherits the lie. */
+const LOAD_EPS = 0.005;
+function nextLoad(set, cur){ for(const v of set) if(v>cur+LOAD_EPS) return v; return null; }
+function prevLoad(set, cur){ let p=null; for(const v of set){ if(v<cur-LOAD_EPS) p=v; else break; } return p; }
+/* Every load that enters exercise_state must be a MEMBER of the loadable
+   set. Anything else is a weight the gym cannot make. */
+function snapLoad(e, kg){ if(kg==null) return null; return nearestLoad(loadableSet(e, S.settings.gym), kg); }
+function nearestLoad(set, want){
+  if(!set.length) return want;
+  let best=set[0], bd=Math.abs(set[0]-want);
+  for(const v of set){ const d=Math.abs(v-want); if(d<bd){bd=d;best=v;} }
+  return best;
+}
+/* Apply a percentage step, but land on a load the gym can actually make.
+   If the requested step cannot move at least one real increment, it does
+   not silently round to zero — it returns null and the caller records
+   that the actuator could not execute the request. */
+function applyLoadStep(set, cur, pct){
+  const want = cur*(1+pct);
+  const cand = pct>0 ? set.filter(v=>v>cur+LOAD_EPS) : set.filter(v=>v<cur-LOAD_EPS);
+  if(!cand.length) return null;
+  return nearestLoad(cand, want);
+}
+
+const RSF_DEFAULT_GYM = {
+  id:"rsf", name:"Berkeley RSF", unit:"lb",
+  barKg: toKg(45,"lb"),
+  plates:[{w:45,pairs:8},{w:35,pairs:2},{w:25,pairs:2},{w:10,pairs:4},{w:5,pairs:4},{w:2.5,pairs:2}],
+  dbSegments:[{lo:5,hi:50,step:5},{lo:55,hi:120,step:5}],
+  stackStep:10, microplates:false, microKg:1.25,
+  hasPins:true,
+  equipment:["barbell","bench","adjustable_bench","rack","dumbbells","cable","gravitron",
+    "machine_chest_press","machine_pec_deck","machine_pulldown","machine_csrow","machine_leg_press",
+    "machine_hack","machine_leg_ext","machine_leg_curl_seated","machine_leg_curl_lying",
+    "machine_calf_standing","machine_calf_seated","machine_back_ext","ab_wheel"],
+};
+
+/* ========================= STORAGE (IndexedDB) =====================
+   set_log is append-only and is the system of record. Every derived
+   value is recomputed from it by rebuild(); nothing derived is trusted
+   across a reload. This is what makes a schema change unable to corrupt
+   history, and what makes the planner auditable after the fact.
+   ================================================================== */
+const DB_NAME="overload", DB_VER=1;
+let _db=null;
+function idb(){
+  if(_db) return Promise.resolve(_db);
+  return new Promise((res,rej)=>{
+    const r=indexedDB.open(DB_NAME,DB_VER);
+    r.onupgradeneeded=()=>{
+      const d=r.result;
+      if(!d.objectStoreNames.contains("events")) d.createObjectStore("events",{keyPath:"id",autoIncrement:true});
+      if(!d.objectStoreNames.contains("kv")) d.createObjectStore("kv");
+      if(!d.objectStoreNames.contains("photos")) d.createObjectStore("photos",{keyPath:"id"});
+    };
+    r.onsuccess=()=>{_db=r.result;res(_db)};
+    r.onerror=()=>rej(r.error);
+  });
+}
+function tx(store,mode,fn){
+  return idb().then(d=>new Promise((res,rej)=>{
+    const t=d.transaction(store,mode), s=t.objectStore(store);
+    let out; try{ out=fn(s); }catch(e){ rej(e); return; }
+    t.oncomplete=()=>res(out&&out.result!==undefined?out.result:out);
+    t.onerror=()=>rej(t.error); t.onabort=()=>rej(t.error);
+  }));
+}
+const kvGet=k=>tx("kv","readonly",s=>s.get(k));
+const kvPut=(k,v)=>tx("kv","readwrite",s=>s.put(v,k));
+const allEvents=()=>tx("events","readonly",s=>s.getAll());
+async function append(type,payload){
+  const ev={type,payload,ts:Date.now(),d:todayISO()};
+  const id=await tx("events","readwrite",s=>s.add(ev));
+  ev.id=id; S.events.push(ev); Sync.queue(ev); return ev;
+}
+
+/* ---- eviction canary: an empty store must never read as a fresh start ---- */
+async function canaryCheck(){
+  const c=await kvGet("canary");
+  const evs=await allEvents();
+  if(c && evs.length===0 && c.count>0) return {evicted:true,had:c.count};
+  return {evicted:false};
+}
+const canaryWrite=n=>kvPut("canary",{count:n,at:Date.now()});
+
+/* ========================== DATE HELPERS =========================== */
+function todayISO(){ const d=new Date(); return isoOf(d); }
+function isoOf(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
+function addDays(iso,n){ const [y,m,d]=iso.split("-").map(Number); const t=new Date(y,m-1,d+n); return isoOf(t); }
+function daysBetween(a,b){ const [y1,m1,d1]=a.split("-").map(Number),[y2,m2,d2]=b.split("-").map(Number);
+  return Math.round((Date.UTC(y2,m2-1,d2)-Date.UTC(y1,m1-1,d1))/864e5); }
+function isoWeek(iso){ const [y,m,d]=iso.split("-").map(Number); const dt=new Date(Date.UTC(y,m-1,d));
+  const dn=(dt.getUTCDay()+6)%7; dt.setUTCDate(dt.getUTCDate()-dn+3);
+  const f=new Date(Date.UTC(dt.getUTCFullYear(),0,4)); const fn=(f.getUTCDay()+6)%7;
+  f.setUTCDate(f.getUTCDate()-fn+3);
+  return dt.getUTCFullYear()+"-W"+String(1+Math.round((dt-f)/6048e5)).padStart(2,"0"); }
+function dow(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(y,m-1,d).getDay(); }
+
+/* ============================ STATE ================================ */
+const S = { events:[], settings:null, ex:{}, mus:{}, irr:{}, sessions:[], bw:[], photos:[],
+            diffs:[], plans:{}, redflag:false, calibLast:null, restricted:false };
+
+function defaultSettings(){
+  return { onboarded:false, unit:"lb", gym:JSON.parse(JSON.stringify(RSF_DEFAULT_GYM)),
+    days:[1,2,4,5], minutes:75, slotHour:17, phase:"CUT",
+    screening:"CLEAR", rampUntil:null, startDate:todayISO(),
+    w:{...W_MALE}, tier:{}, indexLift:{}, sex:"male",
+    bodyKg:toKg(180,"lb"), heightCm:177.8,
+    allowOverrule:true, spotterAt:0, unlockHighVolume:false, repo:null, tokenSet:false };
+}
+function newExState(e){
+  return { load:null, lo:e.band[0], hi:e.band[1], hiEff:e.band[1], target:e.band[0],
+    sessions:0, last:null, rirBias:K.RIR_BIAS_INIT, rirBiasN:0,
+    consecShort:0, consecOver:0, sigma:1.2, seeded:false };
+}
+function newMuscleState(){
+  return { target:K.FS_START, tier:"STANDARD", ladder:"RAMP", weeksAt:0, weeksFlat:0,
+    pd:[], probeBase:null, probeLeft:0, deloadLeft:0, lastHard:null, doneWeek:0, fsWeek:0, failWeek:0 };
+}
+
+/* ---- the only place a plan change may be recorded ---- */
+function emit(list, field, oldV, newV, triggerVar, triggerVal, ruleId, sentence){
+  if(!ruleId) throw new Error("ENG-03: a change with no rule id is a build failure: "+field);
+  if(!sentence) throw new Error("ENG-03: a change with no emittable sentence is a build failure: "+field);
+  list.push({field,old:oldV,new:newV,triggerVar,triggerValue:triggerVal,rule:ruleId,sentence,at:Date.now()});
+}
+
+function rebuild(){
+  S.settings = defaultSettings(); S.ex={}; S.mus={}; S.irr={}; S.sessions=[]; S.bw=[];
+  S.photos=[]; S.diffs=[]; S.plans={}; S.redflag=false; S.calibLast=null;
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+
+  const byDate = {};
+  for(const ev of S.events){
+    const p=ev.payload;
+    if(ev.type==="settings") Object.assign(S.settings, p);
+    else if(ev.type==="redflag") S.redflag = !!p.active;
+    else if(ev.type==="weight") S.bw.push({d:p.d,kg:p.kg});
+    else if(ev.type==="photo") S.photos.push(p);
+    else if(ev.type==="irritation"){ S.irr[p.joint]={sev:p.sev,at:p.d,quality:p.quality||null}; }
+    else if(ev.type==="set"){ (byDate[p.d]=byDate[p.d]||[]).push(p); }
+    else if(ev.type==="planStart"){ (S.plans[p.d]=S.plans[p.d]||{}).status="started"; }
+  }
+  // joint irritation decays 1 point per elapsed calendar day, floor 0
+  for(const j of JOINTS){ const r=S.irr[j];
+    if(r.at){ const el=daysBetween(r.at, todayISO()); r.sev=Math.max(0, r.sev-Math.max(0,el)); } }
+
+  const dates = Object.keys(byDate).sort();
+  let lastWeek = null;
+  for(const d of dates){
+    const wk = isoWeek(d);
+    if(lastWeek && wk!==lastWeek) weeklyRollover(lastWeek);
+    lastWeek = wk;
+    const sess = {date:d, week:wk, sets:byDate[d]};
+    S.sessions.push(sess);
+    creditVolume(sess);
+    // Phase 1 ingests COMPLETED sessions only. Ingesting the in-progress day
+    // would move working loads underneath the user mid-workout, and would make
+    // the plan they are standing in front of disagree with the one they started.
+    if(d < todayISO()) ingestSession(sess);
+  }
+  if(lastWeek && lastWeek!==isoWeek(todayISO())) weeklyRollover(lastWeek);
+  computeRestricted();
+}
+
+function exState(id){
+  if(!S.ex[id]) S.ex[id]=newExState(LIBX[id]);
+  return S.ex[id];
+}
+
+/* ---------- volume ledger (VOL-01) ---------- */
+function creditVolume(sess){
+  const seen = {};
+  for(const st of sess.sets){
+    if(st.warmup) continue;
+    const e=LIBX[st.ex]; if(!e) continue;
+    const es=exState(st.ex);
+    const qualifies = es.load ? (st.load >= K.QUALIFY_LOAD_FRAC*es.load && st.reps >= es.lo) : true;
+    if(!qualifies) continue;
+    for(const [m,frac] of Object.entries(e.contributions)){
+      if(!S.mus[m]) continue;
+      S.mus[m].fsWeek += frac;
+      seen[m]=true;
+      if(st.endpoint==="FAILED_CONCENTRIC") S.mus[m].failWeek += frac;
+    }
+  }
+  for(const m of Object.keys(seen)){ S.mus[m].doneWeek += 1; S.mus[m].lastHard = sess.date; }
+}
+
+/* ============ PHASE 1 — ingest yesterday (PRG-00 .. PRG-10) ========
+   The expectation is recomputed with the ACTUAL exercise position and
+   ACTUAL recovery hours, not the planned ones. Without this, exercise #4
+   is judged as if you were fresh, the fatigued set reads as a genuine
+   shortfall, and the planner cuts its load session after session.
+   =================================================================== */
+function ingestSession(sess){
+  const byEx = {};
+  for(const st of sess.sets){ if(!st.warmup) (byEx[st.ex]=byEx[st.ex]||[]).push(st); }
+  const diffs=[];
+  for(const [exId, sets] of Object.entries(byEx)){
+    const e=LIBX[exId]; if(!e) continue;
+    const es=exState(exId);
+    const set = loadableSet(e, S.settings.gym);
+    if(es.load==null && sets.length){
+      /* Cold start: session 1 of every exercise IS the measurement.
+         "Pick a weight you could get about 15 times, do 8" -> working load
+         = reported x 1.12 (Nuzzo 2024 splines; the large between-exercise
+         gap washes out of this particular ratio, so one constant covers
+         everything and the app never ships a %1RM table). No max testing. */
+      es.load = snapLoad(e, sets[0].load * (es.seeded?1:K.SEED_MULT)); es.seeded=true;
+    }
+    es.load = nearestLoad(set, es.load);   // invariant: always a real weight
+    const W = sets.filter(s=>s.rom!==0 && !(s.assisted>0) && s.reps<=K.RIR_IGNORE_REPS);
+    es.sessions += 1; es.last = sess.date;
+    if(!W.length) continue;
+
+    // --- PRG-00 fatigue-aware expectation --------------------------
+    let sumAch=0, sumExp=0;
+    for(const st of W){
+      const exp = (st.pReps||es.target)
+                - K.KAPPA*(st.priorHard||0)
+                - K.PSI*Math.exp(-(st.hoursSince==null?72:st.hoursSince)/24);
+      sumAch += st.reps; sumExp += exp;
+    }
+    const delta = (sumAch - sumExp)/W.length;
+    const coldstart = es.sessions <= K.COLDSTART_SESSIONS;
+
+    if(delta > -K.DEADBAND && delta < K.DEADBAND){          // PRG-01
+      es.consecShort=0; es.consecOver=0;
+      doubleProgression(e, es, set, diffs, W);
+    } else if(delta >= K.DEADBAND){                          // PRG-02
+      /* The up-correction is subject to the SAME increment reality as the
+         double-progression path. Without this, a coarse cable stack turns a
+         "+2%" decision into a 33% jump, which is precisely the failure PRG-06
+         exists to prevent. If the rack cannot make a step inside the cap, add
+         a rep instead — and if reps have run past the band ceiling twice, the
+         jump is forced anyway (PRG-07). */
+      const overshoot = W.every(s=>s.reps > es.hiEff);
+      es.consecOver = overshoot ? es.consecOver+1 : 0;
+      const forced = es.consecOver >= K.FORCE_JUMP_EXPOSURES;
+      let pct = K.UP_STEPS.find(([lim])=>delta<lim)[1];
+      if(coldstart) pct = Math.min(K.COLDSTART_CAP_REL, Math.max(pct, 0.06));
+      const nl = applyLoadStep(set, es.load, pct);
+      const capRel = coldstart ? K.COLDSTART_CAP_REL : K.CAP_REL[e.cls];
+      const capAbs = e.cls==="lb_compound" ? K.CAP_ABS_LOWER : K.CAP_ABS_UPPER;
+      const ceiling = e.band[1] + Math.floor(0.5*(e.band[1]-e.band[0]));
+      const withinCap = nl!=null && (nl-es.load)/es.load <= capRel && (nl-es.load) <= capAbs;
+      if(nl && (withinCap || forced || es.hiEff>=ceiling)){
+        const o=es.load; es.load=nl; es.target=es.lo; es.hiEff=e.band[1]; es.consecOver=0;
+        emit(diffs,"load",o,nl,"delta",r1(delta),forced?"PRG-07":"PRG-02",
+          forced ? `You've been past the top of the band twice — forcing the jump to ${fmtLoad(nl)}. Reps reset to ${es.lo}.`
+                 : `You beat the target by ${r1(delta)} reps a set — load up to ${fmtLoad(nl)}, back to ${es.lo} reps.`);
+      } else if(es.hiEff < ceiling){
+        const o=es.hiEff; es.hiEff += 1; es.target = Math.min(es.hiEff, es.target+1);
+        emit(diffs,"hiEff",o,es.hiEff,"delta",r1(delta),"PRG-06",
+          nl ? `You beat the target, but the next weight up is a ${pct1((nl-es.load)/es.load)} jump — too big. Adding a rep instead.`
+             : `You beat the target but there is nothing heavier here — adding a rep instead.`);
+      }
+      es.consecShort=0;
+    } else {                                                 // PRG-03 asymmetric
+      es.consecShort += 1;
+      if(es.consecShort===1 && delta > -2){
+        emit(diffs,"load",es.load,es.load,"delta",r1(delta),"PRG-03",
+          `Held the load — one short session is inside the noise.`);
+      } else {
+        let pct = K.DOWN_STEPS.find(([lim])=>delta>lim)[1];
+        if(coldstart) pct = Math.max(-K.COLDSTART_CAP_REL, pct);
+        const nl = applyLoadStep(set, es.load, pct);
+        if(nl){ const o=es.load; es.load=nl; es.target=es.lo; es.consecShort=0;
+          emit(diffs,"load",o,nl,"delta",r1(delta),"PRG-03",
+            `Missed the target by ${r1(-delta)} reps a set twice — down to ${fmtLoad(nl)}.`);
+        }
+      }
+    }
+
+    // --- PRG-09 calibration ingest -------------------------------
+    for(const st of W){
+      if(st.calibration && st.endpoint==="FAILED_CONCENTRIC" && st.extraReps!=null && st.rir!=null){
+        const o=es.rirBias;
+        es.rirBias = clamp(es.rirBias + K.RIR_BIAS_LR*(st.extraReps - st.rir), 0, 3);
+        es.rirBiasN += 1;
+        emit(diffs,"rirBias",r1(o),r1(es.rirBias),"extraReps",st.extraReps,"PRG-09",
+          `Calibration: you had ${st.extraReps} more reps when you called it ${st.rir}. Adjusting how I read your RIR.`);
+        S.calibLast = sess.date;
+      }
+    }
+  }
+  S.diffs.push({date:sess.date, list:diffs});
+}
+
+function doubleProgression(e, es, set, diffs, W){        // PRG-04..PRG-08
+  const allHit = W.every(s=>s.reps >= (s.pReps||es.target));
+  const overshoot = W.every(s=>s.reps > es.hiEff);
+  if(overshoot) es.consecOver += 1; else es.consecOver = 0;
+  const forced = es.consecOver >= K.FORCE_JUMP_EXPOSURES;   // PRG-07 invariant
+  if(!allHit && !forced) return;
+
+  if(es.target < es.hiEff && !forced){
+    const o=es.target; es.target += 1;
+    emit(diffs,"target",o,es.target,"allSetsHit",true,"PRG-04",
+      `Hit ${o} on every set — going for ${es.target} next time.`);
+    return;
+  }
+  const nxt = nextLoad(set, es.load);
+  const relInc = nxt ? (nxt-es.load)/es.load : Infinity;
+  const capRel = K.CAP_REL[e.cls], capAbs = e.cls==="lb_compound"?K.CAP_ABS_LOWER:K.CAP_ABS_UPPER;
+  const ceiling = e.band[1] + Math.floor(0.5*(e.band[1]-e.band[0]));   // PRG-06
+
+  if(nxt && (relInc<=capRel && (nxt-es.load)<=capAbs || forced)){
+    const o=es.load; es.load=nxt; es.target=es.lo; es.hiEff=e.band[1]; es.consecOver=0;
+    emit(diffs,"load",o,nxt,forced?"consecOver":"toppedBand",forced?es.consecOver:true,
+      forced?"PRG-07":"PRG-05",
+      forced ? `You've been over the top of the band twice — forcing the jump to ${fmtLoad(nxt)}. Reps reset to ${es.lo}.`
+             : `Topped the band — ${fmtLoad(o)} → ${fmtLoad(nxt)}, back to ${es.lo} reps.`);
+    return;
+  }
+  /* THE INCREMENT-STALL RULE (PRG-06). Your gym cannot make the jump the
+     math wants. Do not fake a fractional carry, do not drift reps forever,
+     do not stall. Widen the band by up to half its width, then force.
+     Licence: ACSM 2026 — "Muscle hypertrophy was not affected by load." */
+  if(es.hiEff < ceiling){
+    const o=es.hiEff; es.hiEff += 1; es.target += 1;
+    emit(diffs,"hiEff",o,es.hiEff,"relInc",nxt?pct1(relInc):"none","PRG-06",
+      nxt ? `The next weight up is a ${pct1(relInc)} jump — too big. Adding a rep instead.`
+          : `Nothing heavier exists here. Adding a rep instead.`);
+  } else if(nxt){
+    const o=es.load; es.load=nxt; es.target=es.lo; es.hiEff=e.band[1];
+    emit(diffs,"load",o,nxt,"bandCeiling",ceiling,"PRG-06",
+      `Big jump: ${fmtLoad(o)} → ${fmtLoad(nxt)}, reps reset to ${es.lo}. Expect two hard sessions.`);
+  }
+}
+
+/* ============ PHASE 2 — weekly rollover (VOL-*) =================== */
+function indexScore(m, week){
+  const exId = S.settings.indexLift[m]; if(!exId) return null;
+  const es = S.ex[exId]; const ref = es && es.load ? es.load : null; if(!ref) return null;
+  let sum=0,n=0;
+  for(const s of S.sessions){ if(s.week!==week) continue;
+    for(const st of s.sets){ if(st.ex!==exId||st.warmup) continue;
+      sum += st.reps + 40*Math.log(st.load/ref); n++; } }
+  return n ? sum/n : null;
+}
+function weeklyRollover(week){
+  const prevWeek = prevWeekOf(week);
+  for(const m of MUSCLES){
+    const ms=S.mus[m], diffs=[];
+    const a=indexScore(m,week), b=indexScore(m,prevWeek);
+    if(a!=null && b!=null){
+      const pd=a-b; ms.pd.push(pd); if(ms.pd.length>8) ms.pd.shift();
+      const sigma = Math.max(K.SIGMA_FLOOR, sd(ms.pd));
+      ms.z = pd/sigma;
+    }
+    const roll3 = (ms.zHist=ms.zHist||[], ms.z!=null&&ms.zHist.push(ms.z), ms.zHist.length>3&&ms.zHist.shift(),
+                   ms.zHist.reduce((x,y)=>x+y,0));
+    const deloadTrig = S.settings.phase==="CUT" ? K.ROLL3_DELOAD*K.CUT_DELOAD_MULT : K.ROLL3_DELOAD;
+    const irrMax = Math.max(0, ...Object.values(S.irr).map(r=>r.sev));
+
+    if(ms.deloadLeft>0){ ms.deloadLeft -= 7; if(ms.deloadLeft<=0){ ms.ladder="HOLD";
+        emit(diffs,"ladder","DELOAD","HOLD","deloadDone",true,"VOL-10",`${MUSCLE_LABEL[m]} deload finished — back to normal sets.`);} }
+    else if(roll3 <= deloadTrig || countIrritated(5)>=2){                 // VOL-05
+      ms.ladder="DELOAD"; ms.deloadLeft=K.DELOAD_DAYS;
+      emit(diffs,"ladder","*","DELOAD","roll3",r1(roll3),"VOL-05",
+        `${MUSCLE_LABEL[m]} performance is down three weeks running — halving sets for a week. Load stays where it is.`);
+    }
+    else if(ms.fsWeek < K.SHORTFALL_HOLD*ms.target){                      // VOL-07
+      emit(diffs,"target",ms.target,ms.target,"completed",r1(ms.fsWeek),"VOL-07",
+        `Logged ${r1(ms.fsWeek)} of ${r1(ms.target)} sets for ${MUSCLE_LABEL[m].toLowerCase()} — holding, not adding. You cannot bank volume you did not do.`);
+    }
+    else if(S.settings.phase==="CUT"){                                     // VOL-08
+      if(ms.ladder!=="MAINTAIN"){ ms.ladder="MAINTAIN";
+        emit(diffs,"ladder","*","MAINTAIN","phase","CUT","VOL-08",
+          `You're cutting — holding ${MUSCLE_LABEL[m].toLowerCase()} at ${r1(ms.target)} sets rather than chasing more.`); }
+    }
+    else if(ms.ladder==="RAMP"){
+      const o=ms.target; ms.target=Math.min(K.FS_DEFAULT, ms.target+K.FS_RAMP_STEP);
+      if(ms.target>=K.FS_DEFAULT) ms.ladder="BUILD";
+      emit(diffs,"target",o,ms.target,"ramp",true,"SAF-RAMP",
+        `Ramping ${MUSCLE_LABEL[m].toLowerCase()}: ${r1(o)} → ${r1(ms.target)} sets a week.`);
+    }
+    else if(roll3 >= K.ROLL3_UP && ms.weeksAt>=2 && irrMax<4){             // VOL-06
+      if(ms.target+K.FS_UP > K.FS_SOFT_CEIL && !S.settings.unlockHighVolume){
+        emit(diffs,"target",ms.target,ms.target,"softCeiling",K.FS_SOFT_CEIL,"VOL-06",
+          `${MUSCLE_LABEL[m]} is at ${r1(ms.target)} sets. Above 20 the evidence stops agreeing with itself — unlock it in Setup if you want to go higher.`);
+      } else {
+        const o=ms.target; ms.target+=K.FS_UP; ms.weeksAt=0; ms.weeksFlat=0;
+        emit(diffs,"target",o,ms.target,"roll3",r1(roll3),"VOL-06",
+          `${MUSCLE_LABEL[m]} is moving — ${r1(o)} → ${r1(ms.target)} sets a week.`);
+      }
+    }
+    else if(Math.abs(roll3) < K.ROLL3_UP){
+      ms.weeksFlat += 1;
+      /* THE DESCENT PROBE (VOL-09). Volume must be able to come DOWN on
+         flatness, not only on a complaint — otherwise a stoic user who
+         grinds and reports nothing ratchets to the ceiling and sits there
+         with no way to tell thriving from digging a hole.
+         Arithmetic licence: g(20)-g(16) = 0.79% against a ~2% detection
+         floor. Volume above ~16 sets is nearly free to give back. */
+      if(ms.weeksFlat>=K.FLAT_WEEKS_PROBE && ms.ladder==="HOLD" && ms.target>K.PROBE_MIN_TARGET){
+        ms.probeBase=ms.target; const o=ms.target;
+        ms.target-=K.PROBE_DROP; ms.ladder="PROBE"; ms.probeLeft=K.PROBE_WEEKS;
+        emit(diffs,"target",o,ms.target,"weeksFlat",ms.weeksFlat,"VOL-09",
+          `${MUSCLE_LABEL[m]} has been flat 8 weeks — trying ${r1(K.PROBE_DROP)} fewer sets for a month to see if the extra work was doing anything.`);
+      }
+    }
+    if(ms.ladder==="PROBE"){
+      ms.probeLeft-=1;
+      if(ms.probeLeft<=0){
+        if(roll3>=-K.ROLL3_UP){ ms.ladder="HOLD";
+          emit(diffs,"target",ms.probeBase,ms.target,"probe","kept","VOL-09",
+            `${MUSCLE_LABEL[m]} held up on fewer sets — keeping the lower volume and the time back.`);
+        } else { const o=ms.target; ms.target=ms.probeBase; ms.ladder="HOLD";
+          emit(diffs,"target",o,ms.target,"probe","reverted","VOL-09",
+            `${MUSCLE_LABEL[m]} dropped off on fewer sets — putting them back.`); }
+        ms.weeksFlat=0;
+      }
+    }
+    ms.weeksAt += 1; ms.fsWeek=0; ms.doneWeek=0; ms.failWeek=0;
+    if(diffs.length) S.diffs.push({date:week, list:diffs, weekly:true});
+  }
+}
+function prevWeekOf(w){ const [y,n]=w.split("-W").map(Number);
+  return n>1 ? y+"-W"+String(n-1).padStart(2,"0") : (y-1)+"-W52"; }
+function countIrritated(th){ return JOINTS.filter(j=>S.irr[j].sev>=th).length; }
+function sd(a){ if(a.length<2) return 0; const m=a.reduce((x,y)=>x+y,0)/a.length;
+  return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/(a.length-1)); }
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const r1=v=>Math.round(v*10)/10;
+const pct1=v=>Math.round(v*1000)/10+"%";
+
+/* ===================== DISPLAY / UNIT HELPERS ====================== */
+function u(){ return S.settings ? S.settings.unit : "lb"; }
+function fmtLoad(kg){ if(kg==null) return "—";
+  const v=fromKg(kg,u()); const r=Math.abs(v-Math.round(v))<0.05?Math.round(v):Math.round(v*10)/10;
+  return r+" "+u(); }
+function fmtL(e,kg){ if(kg==null) return "—";
+  return (e.profile==="dumbbell_pair" && e.perSide ? "2 × " : "") + fmtLoad(kg); }
+
+/* ======================= BODYWEIGHT TREND (PHA-*) ==================
+   EWMA alpha 0.10, then OLS slope over a window forced to an exact
+   multiple of 7 days so a weekly weighing rhythm cannot alias into the
+   trend. No calorie or volume change may fire below 8 readings in 14 d.
+   =================================================================== */
+function bwTrend(){
+  if(!S.bw.length) return null;
+  const rows=[...S.bw].sort((a,b)=>a.d<b.d?-1:1);
+  let ew=null; const series=[];
+  for(const r of rows){ ew = ew==null ? r.kg : (K.BW_ALPHA*r.kg + (1-K.BW_ALPHA)*ew);
+    series.push({d:r.d, kg:r.kg, ew}); }
+  const today=todayISO();
+  const win = series.filter(s=>daysBetween(s.d,today) < K.BW_WINDOW_D);
+  const recent14 = series.filter(s=>daysBetween(s.d,today) < 14).length;
+  let slope=null;
+  if(win.length>=3){
+    const x=win.map(s=>-daysBetween(s.d,today)), y=win.map(s=>s.ew);
+    const mx=x.reduce((a,b)=>a+b,0)/x.length, my=y.reduce((a,b)=>a+b,0)/y.length;
+    let num=0,den=0; for(let i=0;i<x.length;i++){num+=(x[i]-mx)*(y[i]-my);den+=(x[i]-mx)**2;}
+    slope = den? num/den : null;   // kg per day
+  }
+  const cur = series[series.length-1];
+  const pctWk = (slope!=null && cur.ew) ? (slope*7)/cur.ew : null;
+  return { ew:cur.ew, last:cur.kg, lastDate:cur.d, slopeKgWk:slope!=null?slope*7:null,
+           pctWk, readings14:recent14, enough:recent14>=K.BW_MIN_READINGS, n:series.length };
+}
+
+/* ===================== RESTRICTED MODE (language rules) ============
+   Behavioural tripwire, not a screening instrument. A high-sensitivity
+   muscle-dysmorphia cutoff flags roughly half of male gym-goers against
+   a single-digit true prevalence — as a gate that is a coin flip. So the
+   trigger is behaviour: >=6 sessions/week for 3 consecutive weeks, or
+   training a muscle whose joint flag is >=6/10.
+   =================================================================== */
+function computeRestricted(){
+  const byWeek={};
+  for(const s of S.sessions) byWeek[s.week]=(byWeek[s.week]||0)+1;
+  const weeks=Object.keys(byWeek).sort().slice(-K.RESTRICTED_WEEKS);
+  const heavy = weeks.length>=K.RESTRICTED_WEEKS && weeks.every(w=>byWeek[w]>=K.RESTRICTED_SESSIONS);
+  const hurt = JOINTS.some(j=>S.irr[j].sev>=6) && S.sessions.length &&
+               daysBetween(S.sessions[S.sessions.length-1].date, todayISO())<=1;
+  S.restricted = !!(heavy||hurt);
+}
+
+/* ======================== THE NIGHTLY PLANNER ======================
+   Pure function of (state, local_date). Called on rollover and again at
+   session start; the session-start call is the authoritative one because
+   every input that matters is freshest then.
+   =================================================================== */
+function ensurePlan(date){
+  const stored = S.plans[date];
+  if(stored && stored.status==="started") return stored;   // ENG-02 never mutate a started plan
+  const p = buildPlan(date);
+  S.plans[date] = Object.assign({status:"unstarted"}, p);
+  return S.plans[date];
+}
+
+function buildPlan(date){
+  const st=S.settings, diffs=[], notes=[];
+
+  /* --- Phase 0: gates ------------------------------------------- */
+  if(S.redflag) return {blocked:true, reason:BLOCKED_STRING, rule:"SAF-RED", slots:[], diffs, notes};
+  if(st.screening==="BLOCKED") return {blocked:true, reason:BLOCKED_STRING, rule:"SAF-SCREEN", slots:[], diffs, notes};
+
+  const ctx = { minRir:1, allowFailure:true, maxSets:4, weeklyCap:null, loadCap:null };
+  if(st.screening==="LIGHT_MODERATE_ONLY"){                       // SAF-01
+    ctx.minRir=3; ctx.allowFailure=false; ctx.loadCap=0.70;
+    notes.push({rule:"SAF-SCREEN", text:"Your screening answers put you in the conservative mode: nothing near failure, loads capped."});
+  }
+  // MIS-01 layoff bands + SAF-RAMP
+  const lastSess = S.sessions.length ? S.sessions[S.sessions.length-1].date : null;
+  const gap = lastSess ? daysBetween(lastSess, date) : null;
+  let ramping = st.rampUntil && date < st.rampUntil;
+  if(gap!=null && gap >= K.LAYOFF_SHORT){
+    ramping = true;
+    notes.push({rule:"MIS-01", text:`${gap} days off — starting you back at reduced sets and 3 reps in reserve for a bit. (This band is an engineering choice, not a trial result.)`});
+  }
+  if(ramping){                                                     // SAF-RAMP
+    ctx.minRir=Math.max(ctx.minRir,K.RAMP_MIN_RIR); ctx.allowFailure=false;
+    ctx.maxSets=K.RAMP_MAX_SETS; ctx.weeklyCap=K.RAMP_WEEKLY_CAP;
+  }
+
+  const isTrainingDay = st.days.includes(dow(date));
+  if(!isTrainingDay && !S.plans[date]) notes.push({rule:"USER", text:"Not one of your training days."});
+
+  /* --- Phase 3: which muscles today (SEL-01..03) ---------------- */
+  const needed={}, deficit={}, eligible=[];
+  for(const m of MUSCLES){
+    const ms=S.mus[m];
+    const target = ctx.weeklyCap ? Math.min(ms.target, ctx.weeklyCap) : ms.target;
+    const eff = ms.ladder==="DELOAD" ? target*K.DELOAD_SET_MULT
+              : ms.tier==="MAINTAIN" ? target*0.33 : target;
+    needed[m]=Math.max(1, Math.ceil(eff/K.SESSION_CAP));
+    deficit[m]=eff - ms.fsWeek;
+    const hrs = ms.lastHard ? daysBetween(ms.lastHard,date)*24 : 999;
+    if(hrs>=K.SPACING_H && ms.doneWeek<needed[m] && deficit[m]>0) eligible.push(m);
+  }
+  let bumpRir=0, setScale=1;
+  let pool = eligible;
+  if(!pool.length && isTrainingDay){
+    pool=[MUSCLES.slice().sort((a,b)=>deficit[b]-deficit[a])[0]];
+    bumpRir=2; setScale=0.75;
+    notes.push({rule:"SEL-03", text:"Everything's inside its 48-hour window, so today is lighter on purpose."});
+  }
+  const tierRank={PRIORITY:0,STANDARD:1,MAINTAIN:2};
+  pool = pool.slice().sort((a,b)=>
+    (tierRank[S.mus[a].tier]-tierRank[S.mus[b].tier]) || (deficit[b]-deficit[a]));
+
+  /* Frequency is never a decision variable — it is ceil(V / SESSION_CAP)
+     (SEL-02). But at cold start every muscle is eligible at once, so a greedy
+     fill would put the whole body into day 1 and leave the clock as the only
+     brake. Spread what is eligible over the training days that are actually
+     left in this ISO week, so each muscle lands on the number of days its own
+     weekly target implies rather than all of them landing today. */
+  const thisWeek = isoWeek(date);
+  let daysLeft = 0;
+  for(let i=0;i<7;i++){ const d=addDays(date,i);
+    if(isoWeek(d)!==thisWeek) break;
+    if(st.days.includes(dow(d))) daysLeft++; }
+  daysLeft = Math.max(1, daysLeft);
+  const perDay = clamp(Math.ceil(pool.length/daysLeft), 1, K.MAX_MUSCLES_PER_DAY);
+  if(pool.length>perDay){
+    notes.push({rule:"SEL-01", text:`${pool.length} muscles are due this week — ${perDay} today, the rest across your remaining ${daysLeft===1?"day":daysLeft+" days"}.`});
+    pool = pool.slice(0, perDay);
+  }
+
+  /* --- Phase 4: exercise selection (SEL-04..06) ----------------- */
+  const block = Math.floor(daysBetween(st.startDate,date)/(7*K.ROTATION_BLOCK_WEEKS));
+  const usedPatterns=new Set(), slots=[]; let minutes=0;
+  const budget = st.minutes;
+  for(const m of pool){
+    const ms=S.mus[m];
+    const idx = st.indexLift[m];
+    if(slots.length >= K.MAX_SLOTS) break;
+    const cands = candidatesFor(m, block).filter(e=>!usedPatterns.has(e.pattern));
+    const chosen=[];
+    if(idx && LIBX[idx] && available(LIBX[idx]) && !usedPatterns.has(LIBX[idx].pattern)) chosen.push(LIBX[idx]);
+    const wantEx = ms.tier==="PRIORITY" ? 2 : 1;   // specialisation is funded by taking from elsewhere
+    for(const e of cands){ if(chosen.length>=wantEx) break; if(chosen.some(c=>c.id===e.id)) continue; chosen.push(e); }
+    if(!chosen.length) continue;
+
+    const target = ctx.weeklyCap ? Math.min(ms.target, ctx.weeklyCap) : ms.target;
+    const eff = ms.ladder==="DELOAD" ? target*K.DELOAD_SET_MULT
+              : ms.tier==="MAINTAIN" ? target*0.33 : target;
+    let want = Math.max(1, Math.round(Math.min(K.SESSION_CAP, eff/needed[m]) * setScale));
+
+    for(const e of chosen){
+      if(slots.length >= K.MAX_SLOTS) break;
+      const es=exState(e.id);
+      const share = Math.max(1, Math.round(want/chosen.length));
+      const sets = Math.min(share, ctx.maxSets);
+      const est = e.setup + sets*(e.rest + 32);
+      if(minutes + est > budget*60 && slots.length){ notes.push({rule:"CAP-01",
+        text:`Ran out of your ${budget} minutes — ${MUSCLE_LABEL[m].toLowerCase()} work moves to your next session.`}); break; }
+      minutes += est; usedPatterns.add(e.pattern);
+      slots.push(buildSlot(e, es, m, sets, ctx, ms, bumpRir, date));
+    }
+  }
+
+  /* --- order: index lifts first, unfailsafe never last-fatigued -- */
+  slots.sort((a,b)=> (b.isIndex?1:0)-(a.isIndex?1:0) || (a.risk-b.risk));
+  slots.forEach((s,i)=>s.pos=i+1);
+
+  /* --- hard floor: never below 1 working set per scheduled muscle */
+  if(!slots.length && isTrainingDay && pool.length)
+    notes.push({rule:"OVERCONSTRAINED", text:"Your time budget and the 48-hour spacing rule collided — nothing fits today."});
+
+  return {date, slots, notes, diffs, minutes:Math.round(minutes/60), ctx, ramping,
+          phase:st.phase, restricted:S.restricted};
+}
+
+function available(e){
+  const eq=S.settings.gym.equipment;
+  return e.equip.every(x=>eq.includes(x));
+}
+function candidatesFor(m, block){
+  // Prime movers only if any exist for this muscle; a 0.5 synergist is a
+  // fallback, never the reason a slot is labelled with that muscle.
+  const prime = LIB.filter(e=>available(e) && (e.contributions[m]||0)>=1.0);
+  const list = prime.length ? prime : LIB.filter(e=>available(e) && (e.contributions[m]||0)>=0.5);
+  // rotating shell: deterministic 8-week rotation, so it stays auditable
+  const rot=[...list].sort((a,b)=>a.id<b.id?-1:1);
+  const off = block % Math.max(1,rot.length);
+  return rot.slice(off).concat(rot.slice(0,off));
+}
+
+function buildSlot(e, es, m, sets, ctx, ms, bumpRir, date){
+  const set = loadableSet(e, S.settings.gym);
+  let load = es.load;
+  if(load==null) load = null;                       // cold start: measured on first exposure
+  else if(ctx.loadCap) load = nearestLoad(set, load*ctx.loadCap);
+  let rir = Math.max(e.cls==="isolation"?K.RIR_ISOLATION:K.RIR_COMPOUND, ctx.minRir) + bumpRir;
+  if(ms.ladder==="DELOAD") rir = Math.max(rir, K.DELOAD_RIR);
+
+  /* --- FAI-04 failure gate. All five must hold. ----------------- */
+  const spotterFresh = (Date.now()-(S.settings.spotterAt||0)) < 4*3600e3;
+  const jointsClear = Object.keys(e.joints).every(j=>!S.irr[j]||S.irr[j].sev===0);
+  const failShare = ms.failWeek < K.FAILURE_SHARE*ms.target;
+  const allowFailure = ctx.allowFailure && (e.failSafe || spotterFresh) && jointsClear
+      && failShare && S.settings.screening==="CLEAR" && !S.restricted;
+  /* SAF-PIN: a lift where a failed rep can pin or drop load on trunk,
+     neck or head is never prescribed at RIR<=1 without a spotter flag
+     set fresh THIS session. The flag defaults false and is never
+     remembered — that is the whole point of it. */
+  if(!e.failSafe && !spotterFresh) rir = Math.max(rir, 2);
+
+  const irritated = Object.keys(e.joints).filter(j=>S.irr[j]&&S.irr[j].sev>=4);
+  return { ex:e.id, name:e.name, muscle:m, sets, reps:es.target||e.band[0],
+    load, loadSet:set, rir, rest:e.rest, isIndex:S.settings.indexLift[m]===e.id,
+    risk:(e.failSafe?0:2)+e.failRisk, allowFailure, cls:e.cls,
+    calibration:false, needsSeed: es.load==null,
+    irritated, romSensitive:e.romSensitive, romCue:e.romCue,
+    band:[es.lo,es.hiEff] };
+}
+
+/* ========================= GITHUB SYNC =============================
+   The authoritative copy of every set is an ordinary file in a private
+   git repo. Portability is by construction: the export format IS the
+   storage format, so `git clone` + a text editor recovers everything
+   forever, offline, with no tool from this app.
+
+   The token is typed once per device and lives in IndexedDB. It is never
+   in the page source. An attacker who reads index.html learns the repo
+   name and the schema; that is the entire disclosure, and obscurity was
+   never the control. Scope it to Contents:read+write on ONE private repo.
+   =================================================================== */
+const Sync = {
+  token:null, owner:null, repo:null, pending:[], timer:null, state:"idle", lastOk:null, lastErr:null,
+  async init(){
+    this.token = await kvGet("gh_token") || null;
+    const r = await kvGet("gh_repo");
+    if(r){ this.owner=r.owner; this.repo=r.repo; }
+    this.lastOk = await kvGet("gh_lastok") || null;
+    this.pending = await kvGet("gh_pending") || [];
+  },
+  configured(){ return !!(this.token && this.owner && this.repo); },
+  queue(ev){ if(!this.configured()) return; this.pending.push(ev); this.schedule(); },
+  schedule(){ clearTimeout(this.timer); this.timer=setTimeout(()=>this.flush(), 15000); },
+  async api(path, opts){
+    const r = await fetch("https://api.github.com"+path, Object.assign({
+      headers:{ "Authorization":"Bearer "+this.token, "Accept":"application/vnd.github+json",
+                "X-GitHub-Api-Version":"2022-11-28" } }, opts||{}));
+    if(r.status===401||r.status===403){ this.state="unauthorized"; throw new Error("auth"); }
+    return r;
+  },
+  async getSha(path){
+    const r = await this.api(`/repos/${this.owner}/${this.repo}/contents/${path}`);
+    if(r.status===404) return null;
+    const j = await r.json(); return j.sha||null;
+  },
+  async putFile(path, bytesOrText, message){
+    const b64 = typeof bytesOrText==="string" ? b64enc(new TextEncoder().encode(bytesOrText)) : b64enc(bytesOrText);
+    const sha = await this.getSha(path);
+    const r = await this.api(`/repos/${this.owner}/${this.repo}/contents/${path}`, {
+      method:"PUT", body: JSON.stringify({message, content:b64, sha:sha||undefined}) });
+    if(!r.ok) throw new Error("put "+r.status);
+    return r.json();
+  },
+  async getFileText(path){
+    const r = await this.api(`/repos/${this.owner}/${this.repo}/contents/${path}`);
+    if(r.status===404) return null;
+    const j = await r.json();
+    return new TextDecoder().decode(b64dec(j.content.replace(/\n/g,"")));
+  },
+  /* One file per training date. A 25-set session is ~5 KB, so every object
+     this app will ever write stays inside the Contents API's "1 MB or
+     smaller: all features supported" band. Directory sharded YYYY/MM keeps
+     ~31 files against the API's 1,000-file-per-directory ceiling. */
+  async flush(){
+    if(!this.configured() || !this.pending.length) return;
+    this.state="syncing"; render();
+    const byDate={};
+    for(const ev of this.pending) (byDate[ev.d]=byDate[ev.d]||[]).push(ev);
+    try{
+      for(const [d, evs] of Object.entries(byDate)){
+        const path = `log/${d.slice(0,4)}/${d.slice(5,7)}/${d}.ndjson`;
+        const existing = await this.getFileText(path);
+        const have = new Set((existing||"").split("\n").filter(Boolean).map(l=>{
+          try{ return JSON.parse(l).id; }catch(e){ return null; } }));
+        const add = evs.filter(e=>!have.has(e.id)).map(e=>JSON.stringify(e)).join("\n");
+        if(!add) continue;
+        const body = (existing? existing.replace(/\n*$/,"\n") : "") + add + "\n";
+        await this.putFile(path, body, `log ${d}: +${evs.length}`);
+      }
+      await this.putFile("state.json", JSON.stringify(snapshot(),null,1), "state snapshot");
+      this.pending=[]; this.lastOk=Date.now(); this.state="ok"; this.lastErr=null;
+      await kvPut("gh_pending",[]); await kvPut("gh_lastok",this.lastOk);
+    }catch(err){
+      this.state = this.state==="unauthorized"?"unauthorized":"error";
+      this.lastErr = String(err.message||err);
+      await kvPut("gh_pending", this.pending);
+    }
+    render();
+  },
+  staleDays(){ return this.lastOk ? (Date.now()-this.lastOk)/864e5 : (S.events.length?999:0); },
+};
+function b64enc(bytes){ let s=""; for(let i=0;i<bytes.length;i+=0x8000) s+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000)); return btoa(s); }
+function b64dec(b64){ const s=atob(b64); const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i); return a; }
+function snapshot(){
+  return { generated: new Date().toISOString().slice(0,10), settings:S.settings,
+    exercises:S.ex, muscles:S.mus, irritation:S.irr, bodyweightTrend:bwTrend(),
+    note:"Derived state. The log/ directory is the system of record; this file is recomputable from it." };
+}
+
+/* =================== PHOTO ENCRYPTION (WebCrypto) ==================
+   Photos are encrypted before they ever reach the repo. Not because of
+   burglars — because automated content review on a private repo could
+   false-positive on body photos, and that costs the account holding his
+   freelance work. The training LOG stays plaintext on purpose: an
+   encrypted log silently downgrades "always get a plain file out" to
+   "portable to this exact app, if I remember the passphrase."
+   PBKDF2 600k (OWASP) -> AES-GCM 256. WebCrypto has no Argon2 and
+   pulling in a WASM one would reintroduce the supply-chain risk we
+   just eliminated.
+   =================================================================== */
+const Photo = {
+  key:null,
+  async salt(){
+    let s = await kvGet("photo_salt");
+    if(!s){ s = crypto.getRandomValues(new Uint8Array(16)); await kvPut("photo_salt", s);
+      if(Sync.configured()) try{ await Sync.putFile("photos/salt.b64", b64enc(s), "photo salt"); }catch(e){} }
+    return s instanceof Uint8Array ? s : new Uint8Array(s);
+  },
+  async unlock(passphrase){
+    const salt = await this.salt();
+    const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase), "PBKDF2", false, ["deriveKey"]);
+    this.key = await crypto.subtle.deriveKey(
+      {name:"PBKDF2", salt, iterations:600000, hash:"SHA-256"},
+      base, {name:"AES-GCM", length:256}, false, ["encrypt","decrypt"]);
+    return this.key;
+  },
+  async encrypt(bytes, photoId, iso){
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const aad = new TextEncoder().encode(photoId+"|"+iso);
+    const ct = new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM", iv, additionalData:aad, tagLength:128}, this.key, bytes));
+    const out = new Uint8Array(4+12+ct.length);
+    out.set(new TextEncoder().encode("VBP1"),0); out.set(iv,4); out.set(ct,16);
+    return out;
+  },
+  async decrypt(blob, photoId, iso){
+    const iv = blob.slice(4,16), ct = blob.slice(16);
+    const aad = new TextEncoder().encode(photoId+"|"+iso);
+    return new Uint8Array(await crypto.subtle.decrypt({name:"AES-GCM", iv, additionalData:aad, tagLength:128}, this.key, ct));
+  },
+  /* Re-encode through a canvas at <=1200px. This drops the EXIF block
+     (including GPS) because it re-encodes from pixel data, and keeps a
+     year of weekly photos near 15 MB. */
+  async downscale(file){
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 1200/Math.max(bmp.width,bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.round(bmp.width*scale); c.height = Math.round(bmp.height*scale);
+    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
+    const blob = await new Promise(r=>c.toBlob(r,"image/jpeg",0.72));
+    return new Uint8Array(await blob.arrayBuffer());
+  }
+};
+const DECRYPT_MD = `# How to decrypt these photos without this app
+
+Files are named photos/YYYY/YYYY-MM-DD.jpg.enc and are laid out as:
+
+    bytes 0..3    magic "VBP1"
+    bytes 4..15   AES-GCM IV (12 bytes)
+    bytes 16..    ciphertext with a 128-bit tag appended
+
+Key derivation: PBKDF2-HMAC-SHA256, 600000 iterations, over the salt in
+photos/salt.b64 (base64, 16 bytes), output 256-bit AES-GCM key.
+Additional authenticated data: the UTF-8 string "<photoId>|<YYYY-MM-DD>".
+
+    import base64, hashlib, sys
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    salt = base64.b64decode(open("photos/salt.b64").read().strip())
+    key  = hashlib.pbkdf2_hmac("sha256", sys.argv[2].encode(), salt, 600000, 32)
+    raw  = open(sys.argv[1], "rb").read()
+    assert raw[:4] == b"VBP1"
+    pid  = sys.argv[3]; iso = sys.argv[4]
+    out  = AESGCM(key).decrypt(raw[4:16], raw[16:], f"{pid}|{iso}".encode())
+    open(sys.argv[1].replace(".enc",""), "wb").write(out)
+
+Run: python decrypt.py photos/2026/2026-09-10.jpg.enc "your passphrase" <photoId> 2026-09-10
+
+The training log is NOT encrypted, on purpose. log/**.ndjson is one JSON
+object per line and needs no key, no tool, and no running app.
+`;
+
+/* ============================== UI ================================ */
+let VIEW="today";
+const $ = s=>document.querySelector(s);
+const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let LIVE = null;   // {date, logged:{exId:[...]}} for the in-progress session
+
+function render(){
+  $("#boot").classList.add("hide");
+  $("#tabs").classList.toggle("hide", !S.settings.onboarded);
+  document.querySelectorAll(".view").forEach(v=>v.classList.remove("on"));
+  $("#topdate").textContent = new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+  if(!S.settings.onboarded){ $("#v-onb").classList.add("on"); renderOnboard(); return; }
+  $("#v-"+VIEW).classList.add("on");
+  document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current", b.dataset.v===VIEW?"true":"false"));
+  ({today:renderToday, train:renderTrain, log:renderLog, body:renderBody, setup:renderSetup})[VIEW]();
+}
+function go(v){ VIEW=v; render(); window.scrollTo(0,0); }
+
+function syncBanner(){
+  if(!Sync.configured()) return `<div class="banner warn">Backup isn't connected yet. Everything is on this device only — one Safari data clear and it's gone. <b>Setup → Backup</b>.</div>`;
+  if(Sync.state==="unauthorized") return `<div class="banner bad">Backup is paused — GitHub rejected the token. Sets are still saving locally and will upload once you reconnect in Setup.</div>`;
+  const d=Sync.staleDays();
+  if(d>2) return `<div class="banner warn">Last backup was ${Math.floor(d)} days ago. ${Sync.pending.length} entries waiting.</div>`;
+  return "";
+}
+
+/* ------------------------------ TODAY ----------------------------- */
+function renderToday(){
+  const date=todayISO(), p=ensurePlan(date);
+  let h = syncBanner();
+  if(S.restricted) h += `<div class="banner warn">You've been training very frequently, or training on a sore joint. I've capped this week and hidden the body numbers. If training is feeling compulsory rather than useful, that's worth talking to someone about.</div>`;
+  if(p.blocked){
+    $("#v-today").innerHTML = h + `<div class="card"><h2>Not planning a session</h2><p class="sub">${esc(p.reason)}</p>
+      <button class="btn wide" data-act="unblock">I've been cleared — unblock</button></div>`;
+    return;
+  }
+  const started = S.plans[date] && S.plans[date].status==="started";
+  const loggedToday = S.events.filter(e=>e.type==="set" && e.payload.d===date).length;
+
+  h += `<div class="card">
+    <div class="row"><h2 class="grow">${p.slots.length?"Today's session":"Rest day"}</h2>
+    ${p.slots.length?`<span class="pill">${p.minutes} min</span>`:""}</div>`;
+  if(p.ramping) h+=`<p class="sub">Ramp-in period: capped sets, 3 reps in reserve, no failure sets.</p>`;
+  if(S.settings.phase==="CUT") h+=`<p class="sub">You're cutting — volume is held, not chased. The job right now is keeping what you have.</p>`;
+  if(!p.slots.length) h+=`<p class="sub">Nothing scheduled. Muscles need 48 hours between hard sessions.</p>`;
+  h+=`</div>`;
+
+  for(const s of p.slots){
+    const e=LIBX[s.ex];
+    h+=`<div class="card tight spine ${s.isIndex?"pri":""}">
+      <div class="row"><div class="grow"><h3>${esc(s.name)}</h3>
+        <div class="mini">${MUSCLE_LABEL[s.muscle]}${s.isIndex?" · index lift":""}</div></div>
+        ${s.allowFailure?`<span class="pill warn">last set to failure</span>`:`<span class="pill">${s.rir} RIR</span>`}</div>
+      <div class="row" style="margin-top:8px">
+        <div class="bigload">${s.needsSeed?"—":esc(fmtL(e,s.load))}</div>
+        <div class="grow mini">${s.sets} × ${s.reps} reps${s.needsSeed?" · first time: we'll measure it":""}</div>
+      </div>
+      ${s.irritated.length?`<p class="why"><b>${esc(s.irritated.join(", "))} flagged</b> — kept away from failure.</p>`:""}
+    </div>`;
+  }
+  for(const n of p.notes) h+=`<p class="why"><b>${esc(n.rule)}</b> ${esc(n.text)}</p>`;
+
+  const yd = S.diffs.slice(-6).reverse();
+  if(yd.length){
+    h+=`<div class="card"><h3>What changed and why</h3>`;
+    for(const grp of yd) for(const d of grp.list)
+      h+=`<p class="why"><b>${esc(d.rule)}</b> ${esc(d.sentence)}</p>`;
+    h+=`</div>`;
+  }
+  if(p.slots.length) h+=`<div class="dock"><button class="btn primary wide big" data-act="start">${started||loggedToday?"Continue session":"Start session"}</button></div>`;
+  $("#v-today").innerHTML=h;
+}
+
+/* ------------------------------ TRAIN ----------------------------- */
+function renderTrain(){
+  const date=todayISO(), p=ensurePlan(date);
+  if(!p.slots.length){ $("#v-train").innerHTML=`<div class="empty">Nothing scheduled today.</div>`; return; }
+  const logged={};
+  for(const ev of S.events) if(ev.type==="set" && ev.payload.d===date)
+    (logged[ev.payload.ex]=logged[ev.payload.ex]||[]).push(ev.payload);
+
+  let h="";
+  for(const s of p.slots){
+    const e=LIBX[s.ex], done=logged[s.ex]||[];
+    const complete = done.length>=s.sets;
+    h+=`<div class="card ${complete?"spine ok":""}">
+      <div class="row"><div class="grow"><h3>${esc(s.name)}</h3>
+      <div class="mini">${done.length}/${s.sets} sets · target ${s.reps} reps · ${s.rir} RIR${s.allowFailure?" (last set: to failure)":""}</div></div></div>`;
+    for(let i=0;i<done.length;i++){ const d=done[i];
+      h+=`<div class="setline"><span class="ix">${i+1}</span>
+        <span class="lg">${esc(fmtL(e,d.load))} × ${d.reps}</span>
+        ${d.rir!=null?`<span class="tag">${d.rir} RIR</span>`:""}
+        ${d.endpoint==="FAILED_CONCENTRIC"?`<span class="tag">failure</span>`:""}
+        ${d.rom===0?`<span class="tag">short ROM</span>`:""}</div>`;
+    }
+    if(!complete){
+      const setIx=done.length+1, isLast=setIx>=s.sets;
+      const cur = done.length?done[done.length-1].load : s.load;
+      h+=`<div class="rule"></div>
+      <div class="row" style="margin-bottom:8px">
+        <select data-load="${s.ex}" style="flex:1">${
+          s.needsSeed && !done.length
+          ? `<option value="">Pick a weight you could do ~15 times</option>`+s.loadSet.map(v=>`<option value="${v}">${esc(fmtL(e,v))}</option>`).join("")
+          : s.loadSet.map(v=>`<option value="${v}" ${Math.abs(v-(cur||0))<1e-6?"selected":""}>${esc(fmtL(e,v))}</option>`).join("")
+        }</select>
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <button class="step" data-act="rep-" data-ex="${s.ex}">−</button>
+        <button class="btn primary big grow" data-act="logset" data-ex="${s.ex}" data-set="${setIx}" data-last="${isLast?1:0}">
+          Log <span data-reps="${s.ex}">${s.needsSeed&&!done.length?8:s.reps}</span> reps</button>
+        <button class="step" data-act="rep+" data-ex="${s.ex}">+</button>
+      </div>
+      ${s.needsSeed&&!done.length?`<p class="why">First time on this one. Pick a weight you're confident you could get about 15 times, then do 8. I'll work out your real working weight from that — no max testing, ever.</p>`:""}
+      ${s.romSensitive&&s.romCue?`<p class="mini">${esc(s.romCue)}</p>`:""}`;
+    }
+    h+=`</div>`;
+  }
+  h+=`<div class="card"><button class="btn wide" data-act="endsession">End session</button></div>`;
+  $("#v-train").innerHTML=h;
+}
+
+/* --------------------------- PROGRESS ----------------------------- */
+function renderLog(){
+  let h="";
+  const exIds=[...new Set(S.events.filter(e=>e.type==="set").map(e=>e.payload.ex))];
+  h+=`<div class="card"><h3>Weekly sets by muscle</h3><p class="mini">Fractional sets. Bar = logged this week, number = target.</p>`;
+  for(const m of MUSCLES){ const ms=S.mus[m];
+    if(ms.fsWeek===0 && ms.target===K.FS_START) continue;
+    const w=Math.min(100, 100*ms.fsWeek/Math.max(1,ms.target));
+    h+=`<div class="setline"><span class="grow">${MUSCLE_LABEL[m]}
+      <div style="height:6px;background:var(--sunken);border-radius:3px;margin-top:4px">
+      <div style="height:6px;width:${w}%;background:var(--accent);border-radius:3px"></div></div></span>
+      <span class="lg">${r1(ms.fsWeek)}/${r1(ms.target)}</span>
+      <span class="tag">${ms.ladder}</span></div>`;
+  }
+  h+=`</div>`;
+
+  if(exIds.length){
+    h+=`<div class="card"><h3>Working weights</h3><div class="scroll-x"><table>
+      <tr><th>Exercise</th><th style="text-align:right">Load</th><th style="text-align:right">Reps</th><th style="text-align:right">Done</th></tr>`;
+    for(const id of exIds){ const e=LIBX[id], es=S.ex[id]; if(!e||!es) continue;
+      h+=`<tr><td>${esc(e.name)}</td><td class="n">${esc(fmtL(e,es.load))}</td>
+      <td class="n">${es.target}</td><td class="n">${es.sessions}</td></tr>`; }
+    h+=`</table></div></div>`;
+  }
+  const all=S.diffs.slice().reverse();
+  h+=`<div class="card"><h3>Every decision</h3><p class="mini">The planner cannot change anything without writing a sentence here. A change with no rule id throws.</p>`;
+  if(!all.length) h+=`<p class="sub">Nothing yet — this fills up after your first couple of sessions.</p>`;
+  for(const g of all.slice(0,40)) for(const d of g.list)
+    h+=`<p class="why"><b>${esc(g.date)} · ${esc(d.rule)}</b> ${esc(d.sentence)}</p>`;
+  h+=`</div>`;
+  $("#v-log").innerHTML=h;
+}
+
+/* ----------------------------- BODY ------------------------------- */
+function renderBody(){
+  if(S.restricted){ $("#v-body").innerHTML=`<div class="card"><h3>Hidden for now</h3>
+    <p class="sub">Body numbers are hidden while the frequency cap is on. They'll come back.</p></div>`; return; }
+  const t=bwTrend();
+  let h=`<div class="card"><h3>Morning weight</h3>
+    <div class="row"><input type="number" step="0.1" inputmode="decimal" id="bwin" placeholder="${u()}">
+    <button class="btn primary" data-act="logbw">Log</button></div>`;
+  if(t){
+    h+=`<div class="row" style="margin-top:12px"><div class="grow">
+      <div class="bigload">${esc(fmtLoad(t.ew))}<small>trend</small></div>
+      <div class="mini">last reading ${esc(fmtLoad(t.last))} · ${t.n} logged</div></div></div>`;
+    if(t.pctWk!=null) h+=`<p class="why"><b>${(t.pctWk*100>=0?"+":"")}${(t.pctWk*100).toFixed(2)}% a week</b> ${
+      S.settings.phase==="CUT"
+        ? (t.pctWk<K.CUT_BAND[0]?"Faster than the −0.5 to −1.0% band — that's where lean mass starts going with it."
+          : t.pctWk>K.CUT_BAND[1]?"Slower than the −0.5 to −1.0% band."
+          : "Inside the −0.5 to −1.0% band.")
+        : "Trend over the last 21 days."}</p>`;
+    if(!t.enough) h+=`<p class="why"><b>${t.readings14}/8 readings</b> in the last 14 days. Below 8 I won't change anything off bodyweight — acting on 3 noisy readings is worse than not acting.</p>`;
+  }
+  h+=`</div>`;
+  h+=`<div class="card"><h3>Photos</h3>
+    <p class="mini">Encrypted on this device before upload. Same pose, same light, same time of day — that's what makes them comparable.</p>`;
+  if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
+    <button class="btn" data-act="unlockphotos">Unlock</button></div>
+    <p class="mini" style="margin-top:8px">Store this in your password manager. Lose it and the photos are gone — the training log is not encrypted precisely so that can never happen to your data.</p>`;
+  else h+=`<button class="btn wide" data-act="addphoto">Add today's photo</button>
+    <div class="ph" id="phgrid" style="margin-top:10px"></div>`;
+  h+=`</div>`;
+  h+=`<p class="why">Nothing in the research this app is built on measured how a physique looks. It measured muscle thickness. This app manages your sets and your loads. It can't see your reflection.</p>`;
+  $("#v-body").innerHTML=h;
+  if(Photo.key) paintPhotos();
+}
+async function paintPhotos(){
+  const g=$("#phgrid"); if(!g) return;
+  const rows=[...S.photos].sort((a,b)=>a.d<b.d?1:-1).slice(0,12);
+  g.innerHTML = rows.map(r=>`<div><img data-pid="${esc(r.id)}" alt="${esc(r.d)}"><div class="mini">${esc(r.d)}</div></div>`).join("")
+    || `<div class="empty">No photos yet.</div>`;
+  for(const r of rows){
+    try{
+      const rec = await tx("photos","readonly",s=>s.get(r.id));
+      if(!rec) continue;
+      const plain = await Photo.decrypt(new Uint8Array(rec.blob), r.id, r.d);
+      const img = g.querySelector(`img[data-pid="${CSS.escape(r.id)}"]`);
+      if(img) img.src = URL.createObjectURL(new Blob([plain],{type:"image/jpeg"}));
+    }catch(e){}
+  }
+}
+
+/* ----------------------------- SETUP ------------------------------ */
+function renderSetup(){
+  const st=S.settings, g=st.gym;
+  const spotterOn=(Date.now()-(st.spotterAt||0))<4*3600e3;
+  let h=syncBanner();
+  h+=`<div class="card"><h3>Backup</h3>
+    <p class="mini">Your log is written as plain NDJSON into a private GitHub repo — one file per training day. <code>git clone</code> and any text editor recovers all of it, forever, with no app.</p>
+    <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
+    <label class="fld"><span>Fine-grained token — Contents: read and write, that repo only</span>
+      <input type="password" id="tok" placeholder="${Sync.token?"•••••••• stored on this device":"github_pat_..."}"></label>
+    <button class="btn primary wide" data-act="savesync">Connect</button>
+    <p class="mini" style="margin-top:8px">Status: <b>${esc(Sync.state)}</b>${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} queued`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
+    <button class="btn wide" data-act="syncnow" style="margin-top:8px">Back up now</button></div>`;
+
+  h+=`<div class="card"><h3>Export</h3>
+    <p class="mini">Everything, as one file. Works with no account and no network.</p>
+    <button class="btn wide" data-act="export">Export everything</button>
+    <button class="btn wide" data-act="import" style="margin-top:8px">Import a backup</button></div>`;
+
+  h+=`<div class="card"><h3>Phase</h3><div class="chips">
+    ${["GAIN","MAINTAIN","CUT"].map(p=>`<button class="chip" aria-pressed="${st.phase===p}" data-act="phase" data-p="${p}">${p==="GAIN"?"Gaining":p==="CUT"?"Cutting":"Maintaining"}</button>`).join("")}
+    </div><p class="mini" style="margin-top:8px">Cutting freezes volume, holds load, and widens the deload trigger by 1.5× — a flat performance trend during a deficit is expected, not a fatigue signal.</p></div>`;
+
+  h+=`<div class="card"><h3>Schedule</h3>
+    <p class="mini">Training days</p><div class="chips" style="margin:6px 0 10px">
+    ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}">${d}</button>`).join("")}</div>
+    <label class="fld"><span>Minutes per session</span><input type="number" id="mins" value="${st.minutes}"></label>
+    <button class="btn wide" data-act="savesched">Save</button></div>`;
+
+  h+=`<div class="card"><h3>Gym — ${esc(g.name)}</h3>
+    <p class="mini">This is what stops the app prescribing a weight your rack cannot make.</p>
+    <div class="grid2">
+      <label class="fld"><span>Units</span><select id="unit">${["lb","kg"].map(x=>`<option ${g.unit===x?"selected":""}>${x}</option>`).join("")}</select></label>
+      <label class="fld"><span>Bar weight (${esc(g.unit)})</span><input type="number" id="bar" step="0.5" value="${r1(fromKg(g.barKg,g.unit))}"></label>
+      <label class="fld"><span>Dumbbells min</span><input type="number" id="dbmin" value="${g.dbSegments[0].lo}"></label>
+      <label class="fld"><span>Dumbbells max</span><input type="number" id="dbmax" value="${g.dbSegments[g.dbSegments.length-1].hi}"></label>
+      <label class="fld"><span>Dumbbell step</span><input type="number" id="dbstep" value="${g.dbSegments[0].step}"></label>
+      <label class="fld"><span>Cable / stack step</span><input type="number" id="stack" value="${g.stackStep}"></label>
+    </div>
+    <label class="fld"><span>Smallest plate pair (${esc(g.unit)})</span><input type="number" id="minplate" step="0.5" value="${Math.min(...g.plates.map(p=>p.w))}"></label>
+    <button class="btn wide" data-act="savegym">Save gym</button></div>`;
+
+  h+=`<div class="card"><h3>Safety</h3>
+    <button class="btn wide" data-act="spotter">${spotterOn?"Spotter / pins set — active for 4 h":"I have a spotter or pins right now"}</button>
+    <p class="mini" style="margin-top:6px">Defaults to off every session and is never remembered. Without it, barbell bench, squat and overhead press are never prescribed under 2 reps in reserve.</p>
+    <div class="rule"></div>
+    <button class="btn wide danger" data-act="redflag">Report a symptom</button>
+    <div class="rule"></div>
+    <p class="mini">Joint irritation decays a point a day. Reporting one keeps that joint away from failure work.</p>
+    <div class="chips">${JOINTS.map(j=>`<button class="chip" data-act="irr" data-j="${j}">${j.replace("_"," ")}${S.irr[j].sev?" "+S.irr[j].sev:""}</button>`).join("")}</div></div>`;
+
+  h+=`<div class="card"><h3>Volume ceiling</h3>
+    <label class="row"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
+    <span class="sub">Allow targets above 20 sets a week</span></label>
+    <p class="mini">Above 20 sets per muscle the evidence stops agreeing with itself. Off by default.</p></div>`;
+
+  h+=`<div class="card"><h3>Provenance</h3><p class="mini">Numbers this app treats as engineering guesses rather than findings, surfaced deliberately:</p>
+    <p class="why"><b>SEL-01</b> 9 sets per muscle per session. Not in the peer-reviewed literature — the figure it's derived from exists only as a preprint whose authors say the region is unresolved.</p>
+    <p class="why"><b>MIS-01</b> 14/28-day layoff bands. No trial has tested a complete 14-day layoff in trained lifters.</p>
+    <p class="why"><b>PRG-08</b> 2–10% load steps. ACSM committee consensus, not a trial.</p>
+    <p class="why"><b>κ, ψ</b> Fatigue priors, frozen until 40 observations. Currently priors, not estimates.</p>
+    <p class="why"><b>Visual weights</b> Judgment. Not one study in the evidence base measured appearance — they measured muscle thickness.</p></div>`;
+  $("#v-setup").innerHTML=h;
+}
+
+/* --------------------------- ONBOARDING --------------------------- */
+let OB={step:0, screen:{}, pairs:[], pi:0, wins:{}};
+function renderOnboard(){
+  const el=$("#v-onb"); let h="";
+  if(OB.step===0){
+    h=`<div class="card"><h2>Overload</h2>
+      <p class="sub">You report what you actually did. Every day it reads that and decides the next session — loads your gym can really make, sets it can justify, and a sentence for every change.</p>
+      <p class="why">It optimises for how you look. That means it will sometimes tell you to do <b>less</b>, and it will rarely send you to failure — the evidence says failure costs fatigue without buying size.</p>
+      <button class="btn primary wide big" data-act="ob-next">Start</button></div>`;
+  } else if(OB.step===1){
+    h=`<div class="card"><h2>Screening</h2><p class="sub">Three questions. They set the safety envelope.</p>
+      <label class="fld"><span>Do you currently exercise regularly?</span>
+        <select id="s1"><option value="yes">Yes</option><option value="no">No</option></select></label>
+      <label class="fld"><span>Any known heart, metabolic or kidney disease — or symptoms suggesting one (chest pain on exertion, unusual breathlessness, fainting)?</span>
+        <select id="s2"><option value="no">No</option><option value="yes">Yes</option></select></label>
+      <label class="fld"><span>Any conditions or medications I should know about? Leave blank if none.</span>
+        <input type="text" id="s3" placeholder="optional"></label>
+      <label class="fld"><span>Age</span><input type="number" id="s4" value="19"></label>
+      <button class="btn primary wide" data-act="ob-screen">Continue</button></div>`;
+  } else if(OB.step===2){
+    const g=OB.gym||RSF_DEFAULT_GYM;
+    h=`<div class="card"><h2>Your gym</h2>
+      <p class="sub">90 seconds, and it's the highest-value data in the app. Defaults are Berkeley RSF — fix anything that's wrong.</p>
+      <div class="grid2">
+        <label class="fld"><span>Units</span><select id="ounit"><option value="lb">lb</option><option value="kg">kg</option></select></label>
+        <label class="fld"><span>Bar weight</span><input type="number" id="obar" value="45"></label>
+        <label class="fld"><span>Dumbbells min</span><input type="number" id="odbmin" value="5"></label>
+        <label class="fld"><span>Dumbbells max</span><input type="number" id="odbmax" value="120"></label>
+        <label class="fld"><span>Dumbbell step</span><input type="number" id="odbstep" value="5"></label>
+        <label class="fld"><span>Cable stack step</span><input type="number" id="ostack" value="10"></label>
+      </div>
+      <label class="fld"><span>Smallest plate pair you have</span><input type="number" id="ominplate" step="0.5" value="2.5"></label>
+      <button class="btn primary wide" data-act="ob-gym">Continue</button></div>`;
+  } else if(OB.step===3){
+    h=`<div class="card"><h2>When you train</h2>
+      <p class="sub">Time is the binding constraint. It decides frequency, the split, and what gets dropped on a bad week.</p>
+      <p class="mini">Days</p><div class="chips" style="margin:6px 0 12px">
+      ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${(OB.days||[1,2,4,5]).includes(i)}" data-act="ob-day" data-d="${i}">${d}</button>`).join("")}</div>
+      <label class="fld"><span>Minutes per session</span><input type="number" id="omins" value="75"></label>
+      <label class="fld"><span>Right now you are</span><select id="ophase">
+        <option value="CUT">Cutting</option><option value="MAINTAIN">Maintaining</option><option value="GAIN">Gaining</option></select></label>
+      <button class="btn primary wide" data-act="ob-sched">Continue</button></div>`;
+  } else if(OB.step===4){
+    const p=OB.pairs[OB.pi];
+    h=`<div class="card"><h2>Priorities</h2>
+      <p class="sub">${OB.pi+1} of ${OB.pairs.length}. If you could only improve one, which?</p>
+      <div class="stack">
+        <button class="btn wide big" data-act="ob-pick" data-w="${p[0]}">${MUSCLE_LABEL[p[0]]}</button>
+        <button class="btn wide big" data-act="ob-pick" data-w="${p[1]}">${MUSCLE_LABEL[p[1]]}</button>
+      </div>
+      <p class="mini" style="margin-top:10px">These become the volume weights. They're judgment, not evidence — no study measured appearance — so you can change them later.</p></div>`;
+  }
+  el.innerHTML=h;
+}
+function buildPairs(){
+  const top=["lats","delts_side","chest","triceps","biceps","quads","glutes","mid_back","hamstrings","calves","abs","delts_rear"];
+  const pairs=[]; for(let i=0;i<12;i++) pairs.push([top[i%top.length], top[(i*5+3)%top.length]]);
+  return pairs.filter(p=>p[0]!==p[1]).slice(0,12);
+}
+
+/* ========================= SHEETS / PROMPTS ======================== */
+function sheet(html){ const s=$("#sheet"); s.className=""; s.innerHTML=`<div class="inner">${html}</div>`; }
+/* No alert()/confirm() anywhere: a native modal on a phone blocks the whole
+   page, and in a gym it is the difference between logging a set and losing it. */
+function toast(msg, kind){
+  const m=document.querySelector("main");
+  const el=document.createElement("div");
+  el.className="banner "+(kind||"warn"); el.textContent=msg;
+  m.insertBefore(el, m.firstChild);
+  setTimeout(()=>el.remove(), 7000);
+}
+let CONFIRM_CB=null;
+function confirmSheet(title, body, yes){
+  return new Promise(res=>{
+    CONFIRM_CB=res;
+    sheet(`<h3>${esc(title)}</h3><p class="sub">${esc(body)}</p>
+      <div class="stack" style="margin-top:14px">
+        <button class="btn primary wide" data-act="confirm-yes">${esc(yes)}</button>
+        <button class="btn wide" data-act="confirm-no">Cancel</button></div>`);
+  });
+}
+function closeSheet(){ const s=$("#sheet"); s.className="hide"; s.innerHTML=""; }
+let RIR_CB=null, END_CB=null;
+function askRIR(cb){
+  RIR_CB=cb;
+  sheet(`<h3>How many more reps could you have done with good form?</h3>
+    <div class="chips" style="margin-top:12px">
+      ${[0,1,2,3].map(v=>`<button class="chip" data-act="rir" data-v="${v}" style="flex:1">${v===3?"3+":v}</button>`).join("")}
+    </div><button class="btn wide" data-act="rir" data-v="" style="margin-top:12px">Skip</button>`);
+}
+function askEndpoint(cb){
+  END_CB=cb;
+  sheet(`<h3>Which was it?</h3><div class="stack" style="margin-top:12px">
+    <button class="btn wide" data-act="endp" data-v="FAILED_CONCENTRIC">Tried another rep, couldn't finish it</button>
+    <button class="btn wide" data-act="endp" data-v="STOPPED_TECHNICAL">Form broke — stopped on the rep before</button>
+    <button class="btn wide" data-act="endp" data-v="STOPPED_AT_RIR">Stopped short</button></div>`);
+}
+
+/* ============================ ACTIONS ============================== */
+const REPBUF={};
+document.addEventListener("click", async (ev)=>{
+  const t=ev.target.closest("[data-act],[data-v]"); if(!t) return;
+  const a=t.dataset.act;
+  try{ await handle(a,t,ev); }catch(err){ console.error(err); toast("Something went wrong: "+(err.message||err), "bad"); }
+});
+document.addEventListener("click", (ev)=>{
+  const b=ev.target.closest("#tabs button"); if(b) go(b.dataset.v);
+});
+
+async function handle(a,t,ev){
+  const st=S.settings;
+  switch(a){
+  /* ---- onboarding ---- */
+  case "ob-next": OB.step=1; return renderOnboard();
+  case "ob-screen": {
+    const dis=$("#s2").value==="yes", cond=$("#s3").value.trim(), age=+$("#s4").value;
+    OB.screen = (dis||cond) ? "LIGHT_MODERATE_ONLY" : "CLEAR";
+    OB.minor = age<18;
+    OB.step=2; return renderOnboard();
+  }
+  case "ob-gym": {
+    const un=$("#ounit").value, mp=+$("#ominplate").value;
+    OB.gym = { id:"main", name:"My gym", unit:un, barKg:toKg(+$("#obar").value,un),
+      plates:[{w:45,pairs:8},{w:35,pairs:2},{w:25,pairs:2},{w:10,pairs:4},{w:5,pairs:4},{w:mp,pairs:2}]
+        .filter((p,i,arr)=>arr.findIndex(q=>q.w===p.w)===i).sort((x,y)=>y.w-x.w),
+      dbSegments:[{lo:+$("#odbmin").value,hi:+$("#odbmax").value,step:+$("#odbstep").value}],
+      stackStep:+$("#ostack").value, microplates:false, microKg:1.25, hasPins:true,
+      equipment: RSF_DEFAULT_GYM.equipment.slice() };
+    OB.step=3; return renderOnboard();
+  }
+  case "ob-day": { OB.days=OB.days||[1,2,4,5];
+    const d=+t.dataset.d; OB.days = OB.days.includes(d)?OB.days.filter(x=>x!==d):OB.days.concat(d).sort();
+    return renderOnboard(); }
+  case "ob-sched": { OB.mins=+$("#omins").value; OB.phase=$("#ophase").value;
+    OB.pairs=buildPairs(); OB.pi=0; OB.wins={}; OB.step=4; return renderOnboard(); }
+  case "ob-pick": {
+    const w=t.dataset.w, p=OB.pairs[OB.pi];
+    OB.wins[w]=(OB.wins[w]||0)+1; const l=p[0]===w?p[1]:p[0]; OB.wins[l]=(OB.wins[l]||0)-1;
+    OB.pi++;
+    if(OB.pi<OB.pairs.length) return renderOnboard();
+    return finishOnboard();
+  }
+  /* ---- session ---- */
+  case "start": await append("planStart",{d:todayISO()}); S.plans[todayISO()].status="started"; return go("train");
+  case "rep+": case "rep-": {
+    const id=t.dataset.ex, span=document.querySelector(`[data-reps="${CSS.escape(id)}"]`);
+    let v=+span.textContent + (a==="rep+"?1:-1); v=Math.max(0,v);
+    span.textContent=v; REPBUF[id]=v; return;
+  }
+  case "logset": {
+    const id=t.dataset.ex, isLast=t.dataset.last==="1";
+    const sel=document.querySelector(`[data-load="${CSS.escape(id)}"]`);
+    if(sel && sel.value==="") return toast("Pick the weight first.");
+    const load=+sel.value;
+    const reps=+document.querySelector(`[data-reps="${CSS.escape(id)}"]`).textContent;
+    const commit=async(rir,endpoint)=>{
+      await commitSet(id, load, reps, rir, endpoint); closeSheet(); render();
+    };
+    if(!isLast) return commit(null,null);
+    return askRIR(async(rir)=>{
+      if(rir===0) return askEndpoint(async(e)=>commit(0,e));
+      return commit(rir, rir==null?null:"STOPPED_AT_RIR");
+    });
+  }
+  case "rir": { const v=t.dataset.v; const cb=RIR_CB; RIR_CB=null; closeSheet(); return cb(v===""?null:+v); }
+  case "endp": { const cb=END_CB; END_CB=null; closeSheet(); return cb(t.dataset.v); }
+  case "endsession": {
+    await append("sessionEnd",{d:todayISO()});
+    Sync.flush(); rebuild(); return go("today");
+  }
+  /* ---- body ---- */
+  case "logbw": { const v=+$("#bwin").value; if(!v) return;
+    await append("weight",{d:todayISO(), kg:toKg(v,u())}); rebuild(); return render(); }
+  case "unlockphotos": { const p=$("#pp").value; if(!p) return;
+    await Photo.unlock(p); if(Sync.configured()) try{ await Sync.putFile("photos/DECRYPT.md", DECRYPT_MD, "how to decrypt without this app"); }catch(e){}
+    return render(); }
+  case "addphoto": {
+    const inp=document.createElement("input"); inp.type="file"; inp.accept="image/*";
+    inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return;
+      const d=todayISO(), id="p"+Date.now();
+      const small=await Photo.downscale(f);
+      const enc=await Photo.encrypt(small, id, d);
+      await tx("photos","readwrite",s=>s.put({id, blob:enc.buffer}));
+      await append("photo",{id,d});
+      if(Sync.configured()) try{ await Sync.putFile(`photos/${d.slice(0,4)}/${d}-${id}.jpg.enc`, enc, "photo "+d); }catch(e){}
+      rebuild(); render(); };
+    return inp.click();
+  }
+  /* ---- setup ---- */
+  case "savesync": {
+    const repo=$("#repo").value.trim(), tok=$("#tok").value.trim();
+    if(repo.includes("/")){ const [o,r]=repo.split("/"); Sync.owner=o; Sync.repo=r;
+      await kvPut("gh_repo",{owner:o,repo:r}); await append("settings",{repo}); }
+    if(tok){ Sync.token=tok; await kvPut("gh_token",tok); await append("settings",{tokenSet:true}); }
+    Sync.state="idle";
+    for(const e of S.events) if(!Sync.pending.find(p=>p.id===e.id)) Sync.pending.push(e);
+    await Sync.flush(); rebuild(); return render();
+  }
+  case "syncnow": for(const e of S.events) if(!Sync.pending.find(p=>p.id===e.id)) Sync.pending.push(e);
+    await Sync.flush(); return render();
+  case "export": return doExport();
+  case "import": {
+    const inp=document.createElement("input"); inp.type="file"; inp.accept=".txt,.json,text/plain,application/json";
+    inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return;
+      const txt=await f.text(); const data=JSON.parse(txt);
+      const have=new Set(S.events.map(e=>e.id));
+      let n=0;
+      for(const e of (data.events||[])) if(!have.has(e.id)){ await tx("events","readwrite",s=>s.put(e)); n++; }
+      S.events=await allEvents(); rebuild(); render(); toast(`Merged ${n} new entries. Nothing was replaced.`, "ok"); };
+    return inp.click();
+  }
+  case "phase": await append("settings",{phase:t.dataset.p}); rebuild(); return render();
+  case "day": { const d=+t.dataset.d;
+    const days = st.days.includes(d)?st.days.filter(x=>x!==d):st.days.concat(d).sort();
+    await append("settings",{days}); rebuild(); return render(); }
+  case "savesched": await append("settings",{minutes:+$("#mins").value}); rebuild(); return render();
+  case "savegym": {
+    const un=$("#unit").value, mp=+$("#minplate").value;
+    const gym=Object.assign({}, st.gym, { unit:un, barKg:toKg(+$("#bar").value,un),
+      plates:[{w:45,pairs:8},{w:35,pairs:2},{w:25,pairs:2},{w:10,pairs:4},{w:5,pairs:4},{w:mp,pairs:2}]
+        .filter((p,i,arr)=>arr.findIndex(q=>q.w===p.w)===i).sort((x,y)=>y.w-x.w),
+      dbSegments:[{lo:+$("#dbmin").value,hi:+$("#dbmax").value,step:+$("#dbstep").value}],
+      stackStep:+$("#stack").value });
+    await append("settings",{gym, unit:un}); rebuild(); return render();
+  }
+  case "spotter": await append("settings",{spotterAt:Date.now()}); rebuild(); return render();
+  case "unlockvol": await append("settings",{unlockHighVolume:t.checked}); rebuild(); return render();
+  case "irr": {
+    const j=t.dataset.j;
+    sheet(`<h3>${j.replace("_"," ")}</h3><p class="sub">How bad, 0–10? This keeps failure work off that joint and decays a point a day.</p>
+      <div class="chips" style="margin-top:10px">${[0,2,4,6,8,10].map(v=>`<button class="chip" data-act="irrset" data-j="${j}" data-v="${v}">${v}</button>`).join("")}</div>
+      <p class="mini" style="margin-top:10px">Sharp, catching, or pain that isn't gone next morning is worth a clinician, not a workout change.</p>`);
+    return;
+  }
+  case "irrset": await append("irritation",{joint:t.dataset.j, sev:+t.dataset.v, d:todayISO()});
+    closeSheet(); rebuild(); return render();
+  case "redflag": {
+    sheet(`<h3>Any of these right now?</h3><ul class="sub">${RED_FLAGS.map(f=>`<li>${esc(f)}</li>`).join("")}</ul>
+      <button class="btn wide danger" data-act="redflag-yes" style="margin-top:12px">Yes — one or more</button>
+      <button class="btn wide" data-act="closesheet" style="margin-top:8px">No</button>`);
+    return;
+  }
+  case "redflag-yes": await append("redflag",{active:true}); closeSheet(); rebuild(); return go("today");
+  case "unblock": await append("redflag",{active:false}); rebuild(); return render();
+  case "closesheet": return closeSheet();
+  case "confirm-yes": { const cb=CONFIRM_CB; CONFIRM_CB=null; closeSheet(); return cb&&cb(true); }
+  case "confirm-no":  { const cb=CONFIRM_CB; CONFIRM_CB=null; closeSheet(); return cb&&cb(false); }
+  }
+}
+
+async function commitSet(exId, load, reps, rir, endpoint){
+  const e=LIBX[exId], date=todayISO(), plan=S.plans[date];
+  const slot=plan.slots.find(s=>s.ex===exId);
+  // inputs to the fatigue-aware expectation, measured not assumed
+  let priorHard=0;
+  for(const ev of S.events) if(ev.type==="set" && ev.payload.d===date){
+    const pe=LIBX[ev.payload.ex]; if(!pe) continue;
+    for(const m of Object.keys(e.contributions)) if(pe.contributions[m]) { priorHard += pe.contributions[m]; break; }
+  }
+  const m = slot?slot.muscle:Object.keys(e.contributions)[0];
+  const lastHard = S.mus[m] && S.mus[m].lastHard;
+  const hoursSince = lastHard ? daysBetween(lastHard,date)*24 : 999;
+  const es = exState(exId);
+  const outlier = es.load && (load < K.OUTLIER_LO*es.load || load > K.OUTLIER_HI*es.load);
+  // SAF-OUTLIER: a load outside 0.5-1.5x the trailing distribution needs a
+  // confirm tap before it can propagate into the next plan.
+  if(outlier){
+    const okGo = await confirmSheet("That's a big jump",
+      `${fmtL(e,load)} is a long way from your usual ${fmtL(e,es.load)}. Log it anyway?`, "Yes, log it");
+    if(!okGo) return;
+  }
+  await append("set",{ d:date, ex:exId, load, reps, rir,
+    endpoint: endpoint || (rir===0?"FAILED_CONCENTRIC":null),
+    pReps: slot?slot.reps:reps, pLoad: slot?slot.load:load, pRir: slot?slot.rir:null,
+    priorHard: r1(priorHard), hoursSince: Math.round(hoursSince),
+    pos: slot?slot.pos:1, warmup:false, rom:1, assisted:0, calibration:false });
+  await canaryWrite(S.events.length);
+}
+
+async function doExport(){
+  const payload={ app:"overload", version:1, exported:new Date().toISOString(),
+    events:S.events, note:"One JSON object per event. The log is plaintext on purpose." };
+  const txt=JSON.stringify(payload);
+  const file=new File([txt], `overload-${todayISO()}.txt`, {type:"text/plain"});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file], title:"Overload backup"}); return; }catch(e){}
+  }
+  const url=URL.createObjectURL(new Blob([txt],{type:"text/plain"}));
+  const a=document.createElement("a"); a.href=url; a.download=`overload-${todayISO()}.txt`; a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+}
+
+async function finishOnboard(){
+  const w={...W_MALE};
+  for(const [m,n] of Object.entries(OB.wins)) w[m]=Math.max(0.2, (w[m]||1)*(1+0.35*n));
+  const ranked=Object.entries(w).sort((a,b)=>b[1]-a[1]).map(x=>x[0]);
+  const tier={}; ranked.forEach((m,i)=>tier[m]= i<3?"PRIORITY" : i>=ranked.length-3?"MAINTAIN":"STANDARD");
+  const indexLift={};
+  for(const m of MUSCLES){ const e=LIB.find(x=>x.index===m); if(e) indexLift[m]=e.id; }
+  const settings={ onboarded:true, unit:OB.gym.unit, gym:OB.gym, days:OB.days||[1,2,4,5],
+    minutes:OB.mins||75, phase:OB.phase||"CUT", screening:OB.screen||"CLEAR",
+    startDate:todayISO(), rampUntil:addDays(todayISO(),K.RAMP_DAYS), w, tier, indexLift };
+  await append("settings",settings);
+  rebuild(); OB={step:0}; go("today");
+}
+
+window.addEventListener("error", e=>{ try{ toast("Error: "+e.message, "bad"); }catch(_){} });
+window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reason&&e.reason.message||e.reason), "bad"); }catch(_){} });
+
+/* ============================== BOOT =============================== */
+(async function boot(){
+  try{
+    S.events = await allEvents();
+    await Sync.init();
+    rebuild();
+    const c = await canaryCheck();
+    if(c.evicted){
+      $("#boot").classList.add("hide");
+      document.querySelector("main").insertAdjacentHTML("afterbegin",
+        `<div class="banner bad">This device had ${c.had} entries and now has none — the browser cleared the app's storage. Don't log anything yet. Restore from GitHub or an export first (Setup → Import).</div>`);
+    }
+    if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+    // idempotent rollover: '!=' not '>', because westward travel and clock
+    // corrections move the local date BACKWARDS and '>' strands you on yesterday.
+    const last = await kvGet("last_rollover");
+    if(last !== todayISO()){ ensurePlan(todayISO()); await kvPut("last_rollover", todayISO()); }
+    render();
+    setInterval(()=>{ if(Sync.pending.length) Sync.flush(); }, 120000);
+  }catch(e){
+    $("#boot").textContent = "Failed to start: "+(e.message||e);
+    console.error(e);
+  }
+})();
+</script>
