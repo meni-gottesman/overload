@@ -254,5 +254,45 @@ run(`
 ok("a 30-rep warm-up does not trigger a load jump", ctx.WU_LOAD_AFTER===ctx.WU_LOAD_BEFORE,
    `${ctx.LB2(ctx.WU_LOAD_BEFORE)} -> ${ctx.LB2(ctx.WU_LOAD_AFTER)} lb`);
 
+console.log("\nSAF-RAMP — a calibration set is a failure set, so the ramp forbids it");
+run(`
+  S.settings=defaultSettings();
+  S.settings.startDate = "2026-02-01";
+  S.settings.rampUntil = "2026-02-22";     // still inside the 21-day ramp
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  S.ex={}; S.calibLast=null; S.sessions=[]; S.events=[];
+  RAMP_PLAN = buildPlan("2026-02-10");
+  RAMP_CALIB = (RAMP_PLAN.slots||[]).some(s=>s.calibration);
+  RAMP_FAILURE = (RAMP_PLAN.slots||[]).some(s=>s.allowFailure);
+  RAMP_RIR_MIN = Math.min(...(RAMP_PLAN.slots||[{rir:9}]).map(s=>s.rir));
+  RAMP_MAXSETS = Math.max(...(RAMP_PLAN.slots||[{sets:0}]).map(s=>s.sets));
+
+  S.settings.rampUntil = "2026-02-02";     // ramp is over
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  S.ex={}; S.calibLast=null;
+  POST_PLAN = buildPlan("2026-02-10");
+  POST_CALIB = (POST_PLAN.slots||[]).some(s=>s.calibration);
+`);
+ok("no calibration set during the ramp", ctx.RAMP_CALIB===false);
+ok("no failure sets at all during the ramp", ctx.RAMP_FAILURE===false);
+ok("ramp holds every set at >= 3 RIR", ctx.RAMP_RIR_MIN>=3, ctx.RAMP_RIR_MIN);
+ok("ramp caps sets per exercise at 2", ctx.RAMP_MAXSETS<=2, ctx.RAMP_MAXSETS);
+ok("calibration becomes available once the ramp ends", ctx.POST_CALIB===true);
+
+console.log("\nSingle-user config — no wizard, usable on the first open");
+run(`
+  DS = defaultSettings();
+  CFG_ONBOARDED = DS.onboarded;
+  CFG_INDEX = Object.keys(DS.indexLift).length;
+  CFG_TIERS = new Set(Object.values(DS.tier)).size;
+  CFG_NODIRECT_TIER = NO_DIRECT.size && [...NO_DIRECT].every(m=>DS.tier[m]==="MAINTAIN");
+  CFG_W_LEGAL = weightsLegal(DS.w);
+`);
+ok("opens configured, no wizard", ctx.CFG_ONBOARDED===true);
+ok("an index lift is assigned for most groups", ctx.CFG_INDEX>=12, ctx.CFG_INDEX);
+ok("tiers are populated", ctx.CFG_TIERS>=2, ctx.CFG_TIERS);
+ok("indirect-only groups start at maintenance", ctx.CFG_NODIRECT_TIER===true);
+ok("the shipped weight vector is legal", ctx.CFG_W_LEGAL===true);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail?1:0);

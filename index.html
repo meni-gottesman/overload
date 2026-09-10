@@ -182,8 +182,6 @@ td.n{font-family:var(--mono);text-align:right}
   <section class="view" id="v-log"   aria-label="Progress"></section>
   <section class="view" id="v-body"  aria-label="Body"></section>
   <section class="view" id="v-setup" aria-label="Setup"></section>
-
-  <section class="view" id="v-onb" aria-label="Setup wizard"></section>
 </main>
 
 <nav id="tabs" class="hide">
@@ -660,13 +658,39 @@ const S = { events:[], settings:null, ex:{}, mus:{}, irr:{}, sessions:[], bw:[],
             waist:[], diffs:[], plans:{}, redflag:false, calibLast:null, restricted:false,
             phaseSince:null };
 
+/* ===================== SINGLE-USER CONFIGURATION ==================
+   This app has exactly one user and I already know his answers, so there is
+   no wizard. Asking a question whose answer is already known is the same
+   friction the whole logging surface exists to remove.
+
+   Everything below is editable in Setup; nothing here is a lock. The training
+   choices are not arbitrary defaults:
+     - 4 days: frequency effects on hypertrophy are negligible once volume is
+       equated (Pelland 2026, ACSM 2026), so nothing argues for a fifth.
+     - weights: the evidence-derived tier vector, not a pairwise elicitation.
+       Twelve taps cannot out-resolve a literature whose own between-muscle
+       range is smaller than its rater disagreement.
+     - CUT: his current phase. PHA-02 argues on the Today screen that it
+       should end; that stays his call.
+   ================================================================= */
 function defaultSettings(){
-  return { onboarded:false, unit:"lb", gym:JSON.parse(JSON.stringify(RSF_DEFAULT_GYM)),
-    days:[1,2,4,5], minutes:75, slotHour:17, phase:"CUT",
-    screening:"CLEAR", rampUntil:null, startDate:todayISO(),
-    w:{...W_MALE}, tier:{}, indexLift:{}, sex:"male",
-    bodyKg:toKg(180,"lb"), heightCm:177.8,
+  return { onboarded:true, unit:"lb", gym:JSON.parse(JSON.stringify(RSF_DEFAULT_GYM)),
+    days:[1,2,4,5], minutes:120, slotHour:17, phase:"CUT",
+    screening:"CLEAR", rampUntil:null, startDate:null,
+    w:{...W_MALE}, tier:defaultTiers(), indexLift:defaultIndexLifts(), sex:"male",
+    bodyKg:toKg(180,"lb"), heightCm:177.8, firstRun:true,
     allowOverrule:true, spotterAt:0, unlockHighVolume:false, repo:null, tokenSet:false };
+}
+function defaultTiers(){
+  const t={};
+  for(const m of MUSCLES) t[m] = NO_DIRECT.has(m) ? "MAINTAIN"
+    : W_MALE[m]>=TIER_A ? "PRIORITY" : W_MALE[m]<=TIER_C ? "MAINTAIN" : "STANDARD";
+  return t;
+}
+function defaultIndexLifts(){
+  const ix={};
+  for(const m of MUSCLES){ const e=LIB.find(x=>x.index===m); if(e) ix[m]=e.id; }
+  return ix;
 }
 function newExState(e){
   return { load:null, lo:e.band[0], hi:e.band[1], hiEff:e.band[1], target:e.band[0],
@@ -1225,7 +1249,9 @@ function computeRestricted(){
    status does NOT moderate it — so there is no "he's experienced, skip it".
    Placed only on a fail-safe isolation lift with clean joints, never in ramp. */
 function calibrationTarget(slots, ctx, date){
-  if(ctx.ramping || S.settings.screening!=="CLEAR") return null;
+  // A calibration set IS a failure set, so every rule that forbids failure
+  // forbids this. Gate on allowFailure too, not just the ramp flag.
+  if(ctx.ramping || !ctx.allowFailure || S.settings.screening!=="CLEAR") return null;
   const since = S.calibLast ? daysBetween(S.calibLast, date) : 999;
   if(since < K.CALIB_DAYS) return null;
   for(const sl of slots){
@@ -1274,6 +1300,7 @@ function buildPlan(date){
     ramping = true;
     notes.push({rule:"MIS-01", text:`${gap} days off — starting you back at reduced sets and 3 reps in reserve for a bit. (This band is an engineering choice, not a trial result.)`});
   }
+  ctx.ramping = !!ramping;          // read by calibrationTarget (PRG-10)
   if(ramping){                                                     // SAF-RAMP
     ctx.minRir=Math.max(ctx.minRir,K.RAMP_MIN_RIR); ctx.allowFailure=false;
     ctx.maxSets=K.RAMP_MAX_SETS; ctx.weeklyCap=K.RAMP_WEEKLY_CAP;
@@ -1604,11 +1631,9 @@ let LIVE = null;   // {date, logged:{exId:[...]}} for the in-progress session
 
 function render(){
   $("#boot").classList.add("hide");
-  $("#tabs").classList.toggle("hide", !S.settings.onboarded);
+  $("#tabs").classList.remove("hide");
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("on"));
   $("#topdate").textContent = new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
-  if(!S.settings.onboarded){ $("#v-onb").classList.add("on"); renderOnboard(); return; }
-  if($("#v-onb").innerHTML) $("#v-onb").innerHTML="";   // a hidden view is still queryable; stale controls are stale bugs
   $("#v-"+VIEW).classList.add("on");
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current", b.dataset.v===VIEW?"true":"false"));
   ({today:renderToday, train:renderTrain, log:renderLog, body:renderBody, setup:renderSetup})[VIEW]();
@@ -1628,6 +1653,15 @@ function renderToday(){
   const date=todayISO(), p=ensurePlan(date);
   if(!p.slots) p.slots=[];
   let h = syncBanner();
+  if(S.settings.firstRun){
+    const days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+    h+=`<div class="card spine pri"><h3>Set up for you already</h3>
+      <p class="sub">No questionnaire — you've answered all of this. Everything here is editable in <b>Setup</b>.</p>
+      <p class="why"><b>Berkeley RSF</b> · ${S.settings.days.map(d=>days[d]).join(", ")} · cutting · no session time cap</p>
+      <p class="why"><b>Priorities</b> lats, side delts and chest carry the most volume; traps and front delts get no direct sets and clear their floor on indirect work.</p>
+      <p class="why"><b>First 3 weeks</b> are a ramp-in: capped sets, 3 reps in reserve, no failure sets. Loads get measured on your first exposure to each lift — you'll never be asked to test a max.</p>
+      <button class="btn wide" data-act="dismissfirst" style="margin-top:8px">Got it</button></div>`;
+  }
   if(S.restricted) h += `<div class="banner warn">You've been training very frequently, or training on a sore joint. I've capped this week and hidden the body numbers. If training is feeling compulsory rather than useful, that's worth talking to someone about.</div>`;
   if(p.blocked){
     $("#v-today").innerHTML = h + `<div class="card"><h2>Not planning a session</h2><p class="sub">${esc(p.reason)}</p>
@@ -1899,6 +1933,12 @@ function renderSetup(){
     <p class="mini">Joint irritation decays a point a day. Reporting one keeps that joint away from failure work.</p>
     <div class="chips">${JOINTS.map(j=>`<button class="chip" data-act="irr" data-j="${j}">${j.replace("_"," ")}${S.irr[j].sev?" "+S.irr[j].sev:""}</button>`).join("")}</div></div>`;
 
+  h+=`<div class="card"><h3>Screening</h3>
+    <p class="mini">Re-answer if anything changes. Current state: <b>${esc(st.screening)}</b>.</p>
+    <div class="chips"><button class="chip" aria-pressed="${st.screening==='CLEAR'}" data-act="screen" data-v="CLEAR">No conditions</button>
+    <button class="chip" aria-pressed="${st.screening==='LIGHT_MODERATE_ONLY'}" data-act="screen" data-v="LIGHT_MODERATE_ONLY">Something to work around</button></div>
+    <p class="mini" style="margin-top:8px">The conservative mode caps every set at 3 reps in reserve and every load at 70% of the estimate. Use it if a clinician has told you to take it easy.</p></div>`;
+
   h+=`<div class="card"><h3>Volume ceiling</h3>
     <label class="row"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
     <span class="sub">Allow targets above 20 sets a week</span></label>
@@ -1923,66 +1963,6 @@ function renderSetup(){
     <p class="why"><b>PHA-08</b> The 2.5 cm waist tripwire is calibrated to tape noise, not to any preference study.</p>
     <p class="why"><b>Deleted as unverifiable</b> A 13-14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, and "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p></div>`;
   $("#v-setup").innerHTML=h;
-}
-
-/* --------------------------- ONBOARDING --------------------------- */
-let OB={step:0, screen:{}, pairs:[], pi:0, wins:{}};
-function renderOnboard(){
-  const el=$("#v-onb"); let h="";
-  if(OB.step===0){
-    h=`<div class="card"><h2>Overload</h2>
-      <p class="sub">You report what you actually did. Every day it reads that and decides the next session — loads your gym can really make, sets it can justify, and a sentence for every change.</p>
-      <p class="why">It optimises for how you look. That means it will sometimes tell you to do <b>less</b>, and it will rarely send you to failure — the evidence says failure costs fatigue without buying size.</p>
-      <button class="btn primary wide big" data-act="ob-next">Start</button></div>`;
-  } else if(OB.step===1){
-    h=`<div class="card"><h2>Screening</h2><p class="sub">Three questions. They set the safety envelope.</p>
-      <label class="fld"><span>Do you currently exercise regularly?</span>
-        <select id="s1"><option value="yes">Yes</option><option value="no">No</option></select></label>
-      <label class="fld"><span>Any known heart, metabolic or kidney disease — or symptoms suggesting one (chest pain on exertion, unusual breathlessness, fainting)?</span>
-        <select id="s2"><option value="no">No</option><option value="yes">Yes</option></select></label>
-      <label class="fld"><span>Any conditions or medications I should know about? Leave blank if none.</span>
-        <input type="text" id="s3" placeholder="optional"></label>
-      <label class="fld"><span>Age</span><input type="number" id="s4" value="19"></label>
-      <button class="btn primary wide" data-act="ob-screen">Continue</button></div>`;
-  } else if(OB.step===2){
-    const g=OB.gym||RSF_DEFAULT_GYM;
-    h=`<div class="card"><h2>Your gym</h2>
-      <p class="sub">90 seconds, and it's the highest-value data in the app. Defaults are Berkeley RSF — fix anything that's wrong.</p>
-      <div class="grid2">
-        <label class="fld"><span>Units</span><select id="ounit"><option value="lb">lb</option><option value="kg">kg</option></select></label>
-        <label class="fld"><span>Bar weight</span><input type="number" id="obar" value="45"></label>
-        <label class="fld"><span>Dumbbells min</span><input type="number" id="odbmin" value="5"></label>
-        <label class="fld"><span>Dumbbells max</span><input type="number" id="odbmax" value="120"></label>
-        <label class="fld"><span>Dumbbell step</span><input type="number" id="odbstep" value="5"></label>
-        <label class="fld"><span>Cable stack step</span><input type="number" id="ostack" value="10"></label>
-      </div>
-      <label class="fld"><span>Smallest plate pair you have</span><input type="number" id="ominplate" step="0.5" value="2.5"></label>
-      <button class="btn primary wide" data-act="ob-gym">Continue</button></div>`;
-  } else if(OB.step===3){
-    h=`<div class="card"><h2>When you train</h2>
-      <p class="sub">Time is the binding constraint. It decides frequency, the split, and what gets dropped on a bad week.</p>
-      <p class="mini">Days</p><div class="chips" style="margin:6px 0 12px">
-      ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${(OB.days||[1,2,4,5]).includes(i)}" data-act="ob-day" data-d="${i}">${d}</button>`).join("")}</div>
-      <label class="fld"><span>Minutes per session</span><input type="number" id="omins" value="75"></label>
-      <label class="fld"><span>Right now you are</span><select id="ophase">
-        <option value="CUT">Cutting</option><option value="MAINTAIN">Maintaining</option><option value="GAIN">Gaining</option></select></label>
-      <button class="btn primary wide" data-act="ob-sched">Continue</button></div>`;
-  } else if(OB.step===4){
-    const p=OB.pairs[OB.pi];
-    h=`<div class="card"><h2>Priorities</h2>
-      <p class="sub">${OB.pi+1} of ${OB.pairs.length}. If you could only improve one, which?</p>
-      <div class="stack">
-        <button class="btn wide big" data-act="ob-pick" data-w="${p[0]}">${MUSCLE_LABEL[p[0]]}</button>
-        <button class="btn wide big" data-act="ob-pick" data-w="${p[1]}">${MUSCLE_LABEL[p[1]]}</button>
-      </div>
-      <p class="mini" style="margin-top:10px">These become the volume weights. They're judgment, not evidence — no study measured appearance — so you can change them later.</p></div>`;
-  }
-  el.innerHTML=h;
-}
-function buildPairs(){
-  const top=["lats","delts_side","chest","triceps","biceps","quads","glutes","mid_back","hamstrings","calves","abs","delts_rear"];
-  const pairs=[]; for(let i=0;i<12;i++) pairs.push([top[i%top.length], top[(i*5+3)%top.length]]);
-  return pairs.filter(p=>p[0]!==p[1]).slice(0,12);
 }
 
 /* ========================= SHEETS / PROMPTS ======================== */
@@ -2043,37 +2023,6 @@ document.addEventListener("click", (ev)=>{
 async function handle(a,t,ev){
   const st=S.settings;
   switch(a){
-  /* ---- onboarding ---- */
-  case "ob-next": OB.step=1; return renderOnboard();
-  case "ob-screen": {
-    const dis=$("#s2").value==="yes", cond=$("#s3").value.trim(), age=+$("#s4").value;
-    OB.screen = (dis||cond) ? "LIGHT_MODERATE_ONLY" : "CLEAR";
-    OB.minor = age<18;
-    OB.step=2; return renderOnboard();
-  }
-  case "ob-gym": {
-    const un=$("#ounit").value, mp=+$("#ominplate").value;
-    OB.gym = { id:"main", name:"My gym", unit:un, barKg:toKg(+$("#obar").value,un),
-      plates:[{w:45,pairs:8},{w:35,pairs:2},{w:25,pairs:2},{w:10,pairs:4},{w:5,pairs:4},{w:mp,pairs:2}]
-        .filter((p,i,arr)=>arr.findIndex(q=>q.w===p.w)===i).sort((x,y)=>y.w-x.w),
-      dbSegments:[{lo:+$("#odbmin").value,hi:+$("#odbmax").value,step:+$("#odbstep").value}],
-      stackStep:+$("#ostack").value, microplates:false, microKg:1.25, hasPins:true,
-      equipment: RSF_DEFAULT_GYM.equipment.slice() };
-    OB.step=3; return renderOnboard();
-  }
-  case "ob-day": { OB.days=OB.days||[1,2,4,5];
-    const d=+t.dataset.d; OB.days = OB.days.includes(d)?OB.days.filter(x=>x!==d):OB.days.concat(d).sort();
-    return renderOnboard(); }
-  case "ob-sched": { OB.mins=+$("#omins").value; OB.phase=$("#ophase").value;
-    OB.pairs=buildPairs(); OB.pi=0; OB.wins={}; OB.step=4; return renderOnboard(); }
-  case "ob-pick": {
-    if(!OB.pairs || OB.pi>=OB.pairs.length) return;
-    const w=t.dataset.w, p=OB.pairs[OB.pi];
-    OB.wins[w]=(OB.wins[w]||0)+1; const l=p[0]===w?p[1]:p[0]; OB.wins[l]=(OB.wins[l]||0)-1;
-    OB.pi++;
-    if(OB.pi<OB.pairs.length) return renderOnboard();
-    return finishOnboard();
-  }
   /* ---- session ---- */
   case "start": {
     const d=todayISO(), plan=ensurePlan(d);
@@ -2182,6 +2131,7 @@ async function handle(a,t,ev){
     return inp.click();
   }
   case "phase": await append("settings",{phase:t.dataset.p}); rebuild(); return render();
+  case "screen": await append("settings",{screening:t.dataset.v}); rebuild(); return render();
   case "day": { const d=+t.dataset.d;
     const days = st.days.includes(d)?st.days.filter(x=>x!==d):st.days.concat(d).sort();
     await append("settings",{days}); rebuild(); return render(); }
@@ -2214,6 +2164,7 @@ async function handle(a,t,ev){
   }
   case "redflag-yes": await append("redflag",{active:true}); closeSheet(); rebuild(); return go("today");
   case "unblock": await append("redflag",{active:false}); rebuild(); return render();
+  case "dismissfirst": await append("settings",{firstRun:false}); rebuild(); return render();
   case "closesheet": return closeSheet();
   case "confirm-yes": { const cb=CONFIRM_CB; CONFIRM_CB=null; closeSheet(); return cb&&cb(true); }
   case "confirm-no":  { const cb=CONFIRM_CB; CONFIRM_CB=null; closeSheet(); return cb&&cb(false); }
@@ -2263,32 +2214,6 @@ async function doExport(){
   setTimeout(()=>URL.revokeObjectURL(url),4000);
 }
 
-async function finishOnboard(){
-  /* VOL-15: the pairwise answers REORDER muscles between tiers; they never
-     produce a continuous vector. The evidence resolves four tiers and a 4:1
-     ratio — a finely-graded weight would be fitting one small study's
-     sampling error to twelve taps. Tier SIZES are fixed; only membership moves,
-     and only by one tier, so a run of taps cannot invert the evidence. */
-  const w={...W_MALE};
-  const score = m => (W_MALE[m]||0) + 0.30*(OB.wins[m]||0);
-  const movable = MUSCLES.filter(m=>!NO_DIRECT.has(m));
-  const ranked = movable.sort((a,b)=>score(b)-score(a));
-  const SIZES=[3,7,4], VALS=[TIER_A,TIER_B,TIER_C];
-  let i=0;
-  VALS.forEach((v,k)=>{ for(let j=0;j<SIZES[k] && i<ranked.length;j++,i++) w[ranked[i]]=v; });
-  for(;i<ranked.length;i++) w[ranked[i]]=TIER_C;
-  for(const m of NO_DIRECT) w[m]=TIER_D;
-  if(!weightsLegal(w)) Object.assign(w, W_MALE);   // refuse anything steeper than 4:1
-  const tier={}; ranked.forEach((m,idx)=>tier[m]= idx<3?"PRIORITY" : idx>=ranked.length-4?"MAINTAIN":"STANDARD");
-  for(const m of NO_DIRECT) tier[m]="MAINTAIN";
-  const indexLift={};
-  for(const m of MUSCLES){ const e=LIB.find(x=>x.index===m); if(e) indexLift[m]=e.id; }
-  const settings={ onboarded:true, unit:OB.gym.unit, gym:OB.gym, days:OB.days||[1,2,4,5],
-    minutes:OB.mins||75, phase:OB.phase||"CUT", screening:OB.screen||"CLEAR",
-    startDate:todayISO(), rampUntil:addDays(todayISO(),K.RAMP_DAYS), w, tier, indexLift };
-  await append("settings",settings);
-  rebuild(); OB={step:0}; go("today");
-}
 
 window.addEventListener("error", e=>{ try{ toast("Error: "+e.message, "bad"); }catch(_){} });
 window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reason&&e.reason.message||e.reason), "bad"); }catch(_){} });
@@ -2299,6 +2224,13 @@ window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reaso
     S.events = await allEvents();
     await Sync.init();
     rebuild();
+    // First run: stamp the dates that must be fixed once and never recomputed.
+    // rampUntil especially — recomputing it daily would mean the ramp never ends.
+    if(!S.events.some(e=>e.type==="settings")){
+      await append("settings", { startDate: todayISO(),
+        rampUntil: addDays(todayISO(), K.RAMP_DAYS) });
+      rebuild();
+    }
     const c = await canaryCheck();
     if(c.evicted){
       $("#boot").classList.add("hide");
