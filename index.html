@@ -2297,6 +2297,7 @@ function renderLog(){
   h+=`<p class="mini" style="margin-top:10px">Reviewed every 12 weeks, not weekly: eight weeks of direct shoulder work buys about a millimetre, and a tape can't resolve less than ${K.WAIST_MDC_CM} cm. A weekly number would be noise, and noise you check daily starts to feel like failure.</p>`;
   h+=`</details></div>`;
 
+  h += dataCard();
   $("#v-log").innerHTML=h;
   if(Photo.key) paintPhotos();
 }
@@ -2327,8 +2328,9 @@ async function paintPhotos(){
    ------------------------------------------------------------------ */
 function renderSetup(){
   const st=S.settings, g=st.gym;
-  let h=syncBanner();
+  let h="";
 
+  /* --- what hurts ------------------------------------------------------ */
   h+=`<div class="card"><h3>Anything hurting?</h3>
     <p class="mini">Mention a joint and something that sounds like pain, and I'll offer to work around it.</p>
     <textarea id="notein" rows="2" placeholder="e.g. tweaked my left shoulder benching"></textarea>
@@ -2342,6 +2344,9 @@ function renderSetup(){
     h+=`<div class="rule"></div><details><summary class="mini">Flag a joint directly</summary>
       <div class="chips" style="margin-top:8px">${JOINTS.map(j=>`<button class="chip sm" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))}</button>`).join("")}</div></details>`;
   }
+  h+=`<label class="row" style="margin-top:10px"><input type="checkbox" style="width:auto" ${st.screening==="LIGHT_MODERATE_ONLY"?"checked":""} data-act="screentoggle">
+      <span class="sub">Take it easy — nothing closer than 3 reps from failure</span></label>
+    <button class="btn wide danger" data-act="redflag" style="margin-top:10px">Report a symptom</button>`;
   if(S.notes.length){
     h+=`<details style="margin-top:8px"><summary class="mini">Earlier notes (${S.notes.length})</summary>`;
     for(const n of S.notes.slice().reverse().slice(0,15))
@@ -2350,16 +2355,12 @@ function renderSetup(){
   }
   h+=`</div>`;
 
-  const hid = (st.dismissed||[]);
-  if(hid.length) h+=`<div class="card tight"><div class="row">
-    <div class="grow"><b>${hid.length} hidden note${hid.length>1?"s":""}</b>
-    <div class="mini">Coach notes you told me to stop showing.</div></div>
-    <button class="btn" data-act="unhide">Show again</button></div></div>`;
-
+  /* --- what you're eating for ------------------------------------------ */
   h+=`<div class="card"><h3>Right now I'm</h3><div class="chips">
     ${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([ph,l])=>`<button class="chip" aria-pressed="${st.phase===ph}" data-act="phase" data-p="${ph}" style="flex:1">${l}</button>`).join("")}
     </div></div>`;
 
+  /* --- when you train --------------------------------------------------- */
   h+=`<div class="card"><h3>When I train</h3>
     <div class="chips" style="margin:6px 0 10px">
     ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}" style="flex:1;padding:0 8px">${d}</button>`).join("")}</div>
@@ -2368,23 +2369,11 @@ function renderSetup(){
       <label class="fld"><span>Bodyweight (${esc(u())})</span><input type="number" id="bwset" step="0.5" value="${r1(fromKg(st.bodyKg,u()))}"></label>
     </div>
     <button class="btn wide" data-act="savesched">Save</button>
-    <p class="mini" style="margin-top:6px">Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day. Daily weigh-ins go in Progress.</p></div>`;
+    <p class="mini" style="margin-top:6px">Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day.</p>
+    <label class="row" style="margin-top:10px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
+      <span class="sub">Let a muscle go past 20 sets a week</span></label></div>`;
 
-  h+=`<div class="card"><h3>Backup</h3>
-    <p class="mini">Plain text in a private GitHub repo, one file per training day. <code>git clone</code> gets it all back with no app.</p>
-    <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
-    <label class="fld"><span>Token — Contents: read and write, that repo only</span>
-      <input type="password" id="tok" placeholder="${Sync.token?"•••••••• stored on this device":"github_pat_..."}"></label>
-    <button class="btn primary wide" data-act="savesync">Connect</button>
-    <p class="mini" style="margin-top:8px">${esc(Sync.state)}${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} waiting`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
-    <div class="row" style="margin-top:8px">
-      <button class="btn grow" data-act="syncnow">Back up now</button>
-      <button class="btn grow" data-act="export">Export to a file</button>
-    </div>
-    <button class="btn wide" data-act="import" style="margin-top:8px">Import a backup file</button>
-    <button class="btn wide" data-act="restore" style="margin-top:8px">Restore from GitHub</button>
-    <p class="mini" style="margin-top:6px">Restore merges the repo back in. Nothing local is deleted.</p></div>`;
-
+  /* --- where you train -------------------------------------------------- */
   h+=`<div class="card"><details><summary><b>My gym — ${esc(g.name)}</b></summary>
     <p class="mini" style="margin-top:8px">Only worth touching if you change gyms.</p>
     <div class="grid2">
@@ -2398,7 +2387,37 @@ function renderSetup(){
     <label class="fld"><span>Smallest plate pair</span><input type="number" id="minplate" step="0.5" value="${Math.min(...g.plates.map(p=>p.w))}"></label>
     <button class="btn wide" data-act="savegym">Save gym</button></details></div>`;
 
-  h+=`<div class="card"><details><summary><b>How this works, and what it can't do</b></summary><div style="margin-top:8px">
+  const hid = (st.dismissed||[]);
+  if(hid.length) h+=`<div class="card tight"><div class="row">
+    <div class="grow"><b>${hid.length} hidden note${hid.length>1?"s":""}</b></div>
+    <button class="btn" data-act="unhide">Show again</button></div></div>`;
+
+  $("#v-setup").innerHTML=h;
+}
+
+/* Backup and the honesty block live with the DATA, not with the person.
+   Settings is for facts about him that change; these are neither. */
+function dataCard(){
+  const st=S.settings;
+  let h=`<div class="card"><details ${Sync.configured()?"":"open"}><summary><b>Backup</b> — ${Sync.configured()?esc(Sync.state):"not connected"}</summary>
+    <p class="mini" style="margin-top:8px">Plain text in a private GitHub repo, one file per training day. <code>git clone</code> gets it all back with no app.</p>
+    <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
+    <label class="fld"><span>Token — Contents: read and write, that repo only</span>
+      <input type="password" id="tok" placeholder="${Sync.token?"•••••••• stored on this device":"github_pat_..."}"></label>
+    <button class="btn primary wide" data-act="savesync">Connect</button>
+    <p class="mini" style="margin-top:8px">${esc(Sync.state)}${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} waiting`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
+    <div class="row" style="margin-top:8px">
+      <button class="btn grow" data-act="syncnow">Back up now</button>
+      <button class="btn grow" data-act="export">Export to a file</button>
+    </div>
+    <div class="row" style="margin-top:8px">
+      <button class="btn grow" data-act="import">Import a file</button>
+      <button class="btn grow" data-act="restore">Restore from GitHub</button>
+    </div>
+    <p class="mini" style="margin-top:6px">Restore merges the repo back in. Nothing local is deleted.</p>
+    </details></div>`;
+
+  h+=`<div class="card"><details><summary><b>What these numbers are, and what they aren't</b></summary><div style="margin-top:8px">
     <p class="sub">The training weights come from a small literature on what strangers rate as attractive in photographs and CGI models of men's bodies. That isn't the same as what happens between two people. Where researchers measured actual outcomes instead of ratings, the association is about <b>r = 0.08 to 0.13</b> — half a percent to two percent of the variation. Real, small, and correlational: nobody has ever measured the same man before and after a training block and rated him twice.</p>
     <p class="sub"><b>The per-muscle weights are the weakest part of this app.</b> One study has ever asked women about individual muscle groups. Thirteen of its fourteen muscles sit inside a one-point band on a seven-point scale, while raters disagreed with each other by more than that whole band. So this ships four tiers, not sixteen numbers. Where you see 2.0 beside 1.25, that gap is a judgment about recovery cost — not a measured preference.</p>
     <p class="sub"><b>Body fat is an estimate.</b> Whatever your scale says, the truth is probably within three to five points of it, so nothing here triggers off a body-fat percentage. Everything triggers off waist and scale weight.</p>
@@ -2407,14 +2426,8 @@ function renderSetup(){
     <div class="rule"></div>
     <p class="why"><b>Engineering guesses, labelled as such:</b> the 9-sets-per-session cap (absent from the peer-reviewed literature), the 14- and 28-day layoff bands (no trial), the 2–10% load steps (committee consensus), the two fatigue priors, and the 2.5 cm waist tripwire (calibrated to tape noise).</p>
     <p class="why"><b>Deleted as unverifiable:</b> a 13–14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p>
-    <div class="rule"></div>
-    <label class="row"><input type="checkbox" style="width:auto" ${st.screening==="LIGHT_MODERATE_ONLY"?"checked":""} data-act="screentoggle">
-      <span class="sub">Take it easy — cap everything at 3 reps in reserve</span></label>
-    <label class="row" style="margin-top:8px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
-      <span class="sub">Allow more than 20 sets a week for a muscle</span></label>
-    <button class="btn wide danger" data-act="redflag" style="margin-top:12px">Report a symptom</button>
     </div></details></div>`;
-  $("#v-setup").innerHTML=h;
+  return h;
 }
 
 
@@ -2881,7 +2894,7 @@ window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reaso
     if(c.evicted){
       $("#boot").classList.add("hide");
       document.querySelector("main").insertAdjacentHTML("afterbegin",
-        `<div class="banner bad">This device had ${c.had} entries and now has none — the browser cleared the app's storage. Don't log anything yet: go to <b>Settings → Backup → Restore from GitHub</b> first.</div>`);
+        `<div class="banner bad">This device had ${c.had} entries and now has none — the browser cleared the app's storage. Don't log anything yet: go to <b>Progress → Backup → Restore from GitHub</b> first.</div>`);
     }
     if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
     // idempotent rollover: '!=' not '>', because westward travel and clock
