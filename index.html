@@ -1276,6 +1276,7 @@ function waistStats(){
   return { latest: rows[rows.length-1], median28: med(win28),
            min90: win90.length ? Math.min(...win90.map(r=>r.cm)) : null, n: rows.length };
 }
+function dismissed(rule){ return ((S.settings&&S.settings.dismissed)||[]).includes(rule); }
 function weeksInPhase(){
   const since = S.phaseSince || (S.settings && S.settings.startDate);
   return since ? Math.floor(daysBetween(since, todayISO())/7) : 0;
@@ -1314,13 +1315,11 @@ function phaseAdvice(){
   // PHA-02 the standing call. Deliberately worded as a decision he makes, not
   // a number the app asserts, because his body-fat figure cannot be trusted to
   // +/-3-5 points and the whole recommendation turns on it.
-  if(st.phase==="CUT" && wk<K.MAX_CUT_WEEKS){
-    out.push({rule:"PHA-02", kind:"info",
-      text:`Worth deciding soon: when female raters adjusted male bodies to the most attractive version, they stopped at about 16% body fat — roughly where you already are. Meanwhile a deficit measurably blunts muscle gain (lean-mass effect size −0.57 vs eating at maintenance). If your waist is where you want it, the higher-return lever from here is eating at maintenance and building, not cutting further. Your call — switch phase in Setup.`});
+  if(st.phase==="CUT" && wk<K.MAX_CUT_WEEKS && !dismissed("PHA-02")){
+    out.push({rule:"PHA-02", kind:"info", dismissable:true,
+      text:`You're already about as lean as the evidence says helps. Cutting further mostly costs you muscle.`,
+      more:`When female raters adjusted male bodies to the most attractive version they stopped near 16% body fat, roughly where you are. A deficit measurably blunts muscle gain — lean-mass effect size −0.57 against eating at maintenance. If your waist is where you want it, the higher-return lever is maintenance and building. Switch phase in Settings.`});
   }
-  // PHA-05 protein floor
-  if(st.bodyKg) out.push({rule:"PHA-05", kind:"info",
-    text:`Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day, every phase. A protein shortfall costs you more than a calorie shortfall does.`});
   return out;
 }
 
@@ -1968,6 +1967,7 @@ const $ = s=>document.querySelector(s);
 const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let LIVE = null;   // {date, logged:{exId:[...]}} for the in-progress session
 let OPEN_EX = null;  // the one exercise showing its full logging surface
+const EXPANDED = new Set();   // coach notes whose long form is showing
 /* When a lift finishes, open the next unfinished one. Nobody wants to tap a
    header to find out where they are. */
 function advanceIfComplete(exId){
@@ -2134,8 +2134,8 @@ function renderSession(){
         <button class="chip sm" data-act="busy" data-ex="${s.ex}" data-m="${s.muscle}">It's taken</button>
         <button class="chip sm" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}">+ set</button>
       </div>
-      ${isLast&&s.calibration?`<p class="why">Calibration set. Stop where you normally would and tap how many you had left — then keep going until you can't finish a rep, and tell me how many extra you got. It's the only thing that tells "you got stronger" apart from "you under-report".</p>`:""}
-      ${s.needsSeed&&!done.length?`<p class="why">First time on this one. Pick a weight you're confident you'd get about 15 times, then do 8. I'll work your real working weight out from that — you'll never be asked to test a max.</p>`:""}
+      ${isLast&&s.calibration?`<p class="why">Calibration set: stop where you normally would, tap how many you had left, then keep going to a rep you can't finish and tell me how many extra you got.</p>`:""}
+      ${s.needsSeed&&!done.length?`<p class="why">First time on this one — pick a weight you'd get about 15 times, then do 8. I'll work the rest out.</p>`:""}
       ${s.romSensitive&&s.romCue?`<p class="mini">${esc(s.romCue)}</p>`:""}`;
     } else {
       h+=`<div class="rule"></div><button class="btn wide" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}">Another set</button>`;
@@ -2163,28 +2163,39 @@ function nextTrainingDay(date){
 }
 function firstRunCard(){
   const days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-  return `<div class="card spine pri"><h3>Already set up for you</h3>
-    <p class="sub">No questionnaire — you've answered all of it. Change anything in Setup.</p>
-    <p class="mini">Berkeley RSF · ${S.settings.days.map(d=>days[d]).join(", ")} · cutting · no time cap</p>
-    <p class="mini">First three weeks are deliberately easy: fewer sets, three reps left in the tank, nothing to failure. Loads get measured the first time you touch each lift.</p>
-    <button class="btn wide" data-act="dismissfirst" style="margin-top:8px">Got it</button></div>`;
+  return `<div class="card tight spine pri">
+    <div class="row"><div class="grow">
+      <b>Set up for you</b>
+      <div class="mini">RSF · ${S.settings.days.map(d=>days[d]).join(", ")} · cutting. First three weeks are easy on purpose. Change anything in Settings.</div>
+    </div><button class="btn" data-act="dismissfirst">OK</button></div></div>`;
 }
 /* Everything the planner decided, in plain sentences, folded away. The rule
    ids are in there for when you distrust a number — not on the face of it. */
 function coachCard(p){
-  const adv = phaseAdvice().filter(a=>a.kind!=="info" || a.rule==="PHA-02" || a.rule==="PHA-05");
-  const recent = S.diffs.slice(-4).reverse().flatMap(g=>g.list);
+  const adv = phaseAdvice();
+  /* Only what changed RECENTLY. The card used to re-print the same four
+     paragraphs every day, which is how a screen stops being read at all. */
+  const cutoff = addDays(todayISO(), -8);
+  const recent = S.diffs.filter(g=>String(g.date) >= cutoff).slice(-3).reverse().flatMap(g=>g.list);
   const notes = (p.notes||[]);
   if(!adv.length && !recent.length && !notes.length) return "";
   // Anything that visibly reshaped today is stated plainly; the rest folds away.
   const LOUD = new Set(["SAF-05","CAP-01","MIS-01","OVERCONSTRAINED","PRG-10","SAF-SCREEN"]);
   const loud = notes.filter(n=>LOUD.has(n.rule));
   const quiet = notes.filter(n=>!LOUD.has(n.rule));
+  if(!loud.length && !adv.length && !recent.length) return "";
   let h=`<div class="card"><h3>Why it looks like this</h3>`;
   for(const n of loud) h+=`<p class="why">${esc(n.text)}</p>`;
-  for(const a of adv) h+=`<p class="why">${esc(a.text)}</p>`;
-  if(recent.length||quiet.length){
-    h+=`<details style="margin-top:6px"><summary class="mini">Every change, with its rule</summary>`;
+  for(const a of adv){
+    h+=`<p class="why">${esc(a.text)}`;
+    if(a.more) h+=` <a href="#" data-act="expandnote" data-r="${esc(a.rule)}">why</a>`;
+    if(a.dismissable) h+=` <a href="#" data-act="hidenote" data-r="${esc(a.rule)}">hide</a>`;
+    h+=`</p>`;
+    if(a.more && EXPANDED.has(a.rule)) h+=`<p class="mini" style="margin:-4px 0 8px 13px">${esc(a.more)}</p>`;
+  }
+  for(const d of recent.slice(0,4)) h+=`<p class="why">${esc(d.sentence)}</p>`;
+  if(quiet.length || recent.length>4){
+    h+=`<details style="margin-top:6px"><summary class="mini">Everything, with rule ids</summary>`;
     for(const n of quiet) h+=`<p class="why"><b>${esc(n.rule)}</b> ${esc(n.text)}</p>`;
     for(const d of recent) h+=`<p class="why"><b>${esc(d.rule)}</b> ${esc(d.sentence)}</p>`;
     h+=`</details>`;
@@ -2206,7 +2217,7 @@ function renderLog(){
 
   if(exIds.length){
     h+=`<div class="card"><h3>Working weights</h3>
-      <p class="mini">What the planner will put in front of you next, per lift.</p>
+  
       <div class="scroll-x"><table>
       <tr><th>Lift</th><th style="text-align:right">Load</th><th style="text-align:right">Reps</th><th style="text-align:right">Sessions</th></tr>`;
     for(const id of exIds){ const e=LIBX[id], es=S.ex[id]; if(!e||!es) continue;
@@ -2218,7 +2229,7 @@ function renderLog(){
   }
 
   h+=`<div class="card"><h3>This week</h3>
-    <p class="mini">Sets done against sets planned. A machine that hits two muscles counts as a whole set for the main one and half for the other.</p>`;
+    <p class="mini">Done against planned. A lift hitting two muscles counts whole for the main one, half for the other.</p>`;
   for(const m of MUSCLES){ const ms=S.mus[m];
     if(NO_DIRECT.has(m) && !ms.fsWeek) continue;
     if(!ms.fsWeek && !ms.target) continue;
@@ -2269,7 +2280,7 @@ function renderLog(){
     h+=`</details></div>`;
 
     h+=`<div class="card"><details><summary><b>Photos</b>${S.photos.length?` — ${S.photos.length}`:""}</summary>
-      <p class="mini" style="margin-top:8px">Encrypted on this device before they go anywhere. Same pose, same light, same time of day.</p>`;
+      <p class="mini" style="margin-top:8px">Encrypted on this device. Same pose, same light, same time of day.</p>`;
     if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
       <button class="btn" data-act="unlockphotos">Unlock</button></div>
       <p class="mini" style="margin-top:8px">Keep this in your password manager. Lose it and the photos are gone — the training log is deliberately not encrypted so that can never happen to your actual data.</p>`;
@@ -2283,9 +2294,9 @@ function renderLog(){
     <p class="mini" style="margin-top:8px">Nothing can change without a sentence here. A change with no reason attached throws rather than shipping quietly.</p>`;
   if(!all.length) h+=`<p class="sub">Nothing yet.</p>`;
   for(const d of all.slice(0,60)) h+=`<p class="why"><b>${esc(d.date)}</b> ${esc(d.sentence)} <span class="mini">${esc(d.rule)}</span></p>`;
+  h+=`<p class="mini" style="margin-top:10px">Reviewed every 12 weeks, not weekly: eight weeks of direct shoulder work buys about a millimetre, and a tape can't resolve less than ${K.WAIST_MDC_CM} cm. A weekly number would be noise, and noise you check daily starts to feel like failure.</p>`;
   h+=`</details></div>`;
 
-  h+=`<p class="why">Reviewed every 12 weeks, not weekly. Eight weeks of hard direct work on a shoulder buys about a millimetre of thickness, and a tape cannot resolve less than ${K.WAIST_MDC_CM} cm. A weekly number here would mostly be noise — and noise you check daily starts to feel like failure.</p>`;
   $("#v-log").innerHTML=h;
   if(Photo.key) paintPhotos();
 }
@@ -2319,7 +2330,7 @@ function renderSetup(){
   let h=syncBanner();
 
   h+=`<div class="card"><h3>Anything hurting?</h3>
-    <p class="mini">Plain words. Mention a joint and something that sounds like pain, and I'll offer to keep it out of your sessions.</p>
+    <p class="mini">Mention a joint and something that sounds like pain, and I'll offer to work around it.</p>
     <textarea id="notein" rows="2" placeholder="e.g. tweaked my left shoulder benching"></textarea>
     <button class="btn primary wide" data-act="savenote" style="margin-top:8px">Save</button>`;
   const flagged=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0);
@@ -2339,9 +2350,15 @@ function renderSetup(){
   }
   h+=`</div>`;
 
+  const hid = (st.dismissed||[]);
+  if(hid.length) h+=`<div class="card tight"><div class="row">
+    <div class="grow"><b>${hid.length} hidden note${hid.length>1?"s":""}</b>
+    <div class="mini">Coach notes you told me to stop showing.</div></div>
+    <button class="btn" data-act="unhide">Show again</button></div></div>`;
+
   h+=`<div class="card"><h3>Right now I'm</h3><div class="chips">
     ${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([ph,l])=>`<button class="chip" aria-pressed="${st.phase===ph}" data-act="phase" data-p="${ph}" style="flex:1">${l}</button>`).join("")}
-    </div><p class="mini" style="margin-top:8px">Cutting holds your volume steady instead of chasing more, keeps loads where they are, and widens the deload trigger — a flat trend in a deficit is expected, not a warning.</p></div>`;
+    </div></div>`;
 
   h+=`<div class="card"><h3>When I train</h3>
     <div class="chips" style="margin:6px 0 10px">
@@ -2351,10 +2368,10 @@ function renderSetup(){
       <label class="fld"><span>Bodyweight (${esc(u())})</span><input type="number" id="bwset" step="0.5" value="${r1(fromKg(st.bodyKg,u()))}"></label>
     </div>
     <button class="btn wide" data-act="savesched">Save</button>
-    <p class="mini" style="margin-top:6px">Bodyweight here only sets your protein floor (${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day). Daily weigh-ins go in Progress.</p></div>`;
+    <p class="mini" style="margin-top:6px">Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day. Daily weigh-ins go in Progress.</p></div>`;
 
   h+=`<div class="card"><h3>Backup</h3>
-    <p class="mini">Your log goes to a private GitHub repo as plain text, one file per training day. <code>git clone</code> and any text editor gets it all back, forever, with no app.</p>
+    <p class="mini">Plain text in a private GitHub repo, one file per training day. <code>git clone</code> gets it all back with no app.</p>
     <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
     <label class="fld"><span>Token — Contents: read and write, that repo only</span>
       <input type="password" id="tok" placeholder="${Sync.token?"•••••••• stored on this device":"github_pat_..."}"></label>
@@ -2366,10 +2383,10 @@ function renderSetup(){
     </div>
     <button class="btn wide" data-act="import" style="margin-top:8px">Import a backup file</button>
     <button class="btn wide" data-act="restore" style="margin-top:8px">Restore from GitHub</button>
-    <p class="mini" style="margin-top:6px">Restore pulls every day back out of the repo and merges it. Nothing local is deleted — events already here are left alone.</p></div>`;
+    <p class="mini" style="margin-top:6px">Restore merges the repo back in. Nothing local is deleted.</p></div>`;
 
   h+=`<div class="card"><details><summary><b>My gym — ${esc(g.name)}</b></summary>
-    <p class="mini" style="margin-top:8px">What stops the app asking for a weight your rack cannot make. Only worth touching if you change gyms.</p>
+    <p class="mini" style="margin-top:8px">Only worth touching if you change gyms.</p>
     <div class="grid2">
       <label class="fld"><span>Units</span><select id="unit">${["lb","kg"].map(x=>`<option ${g.unit===x?"selected":""}>${x}</option>`).join("")}</select></label>
       <label class="fld"><span>Bar weight</span><input type="number" id="bar" step="0.5" value="${r1(fromKg(g.barKg,g.unit))}"></label>
@@ -2468,6 +2485,17 @@ async function handle(a,t,ev){
   const st=S.settings;
   switch(a){
   /* ---- session ---- */
+  case "expandnote": ev.preventDefault();
+    EXPANDED.has(t.dataset.r) ? EXPANDED.delete(t.dataset.r) : EXPANDED.add(t.dataset.r);
+    return render();
+  case "unhide": await append("settings",{dismissed:[]}); rebuild(); render();
+    return toast("Back on the Today screen.", "ok");
+  case "hidenote": {
+    ev.preventDefault();
+    const list=[...((S.settings.dismissed)||[]), t.dataset.r];
+    await append("settings",{dismissed:[...new Set(list)]});
+    rebuild(); render(); return toast("Hidden. It's still in Settings if you want it back.", "ok");
+  }
   case "openex": OPEN_EX = (OPEN_EX===t.dataset.ex) ? null : t.dataset.ex; return render();
   case "busy": {
     const exId=t.dataset.ex, m=t.dataset.m;
