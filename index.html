@@ -1992,7 +1992,7 @@ function render(){
 function go(v){ VIEW=v; render(); window.scrollTo(0,0); }
 
 function syncBanner(){
-  if(!Sync.configured()) return `<div class="banner warn">Backup isn't connected yet. Everything is on this device only — one Safari data clear and it's gone. <b>Setup → Backup</b>.</div>`;
+  if(!Sync.configured()) return `<div class="banner warn">Backup isn't connected yet. Everything is on this device only — one Safari data clear and it's gone. <b>Progress → Backup</b>.</div>`;
   if(Sync.state==="unauthorized") return `<div class="banner bad">Backup is paused — GitHub rejected the token. Sets are still saving locally and will upload once you reconnect in Setup.</div>`;
   const d=Sync.staleDays();
   if(d>2) return `<div class="banner warn">Last backup was ${Math.floor(d)} days ago. ${Sync.pending.length} entries waiting.</div>`;
