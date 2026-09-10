@@ -201,5 +201,58 @@ run(`
 `);
 ok("no threshold is finer than the tape's own resolution", ctx.TRIP > ctx.MDC, `trip ${ctx.TRIP} vs MDC ${ctx.MDC}`);
 
+console.log("\nPLATE MATH — no arithmetic between sets");
+run(`
+  S.settings=defaultSettings();
+  PM_135 = plateMath(LIBX["bb_bench"], toKg(135,"lb"));
+  PM_BAR = plateMath(LIBX["bb_bench"], toKg(45,"lb"));
+  PM_225 = plateMath(LIBX["bb_bench"], toKg(225,"lb"));
+  PM_CABLE = plateMath(LIBX["cable_lat_raise"], toKg(50,"lb"));
+`);
+ok("135 lb is one 45 a side", /1×45/.test(ctx.PM_135||""), ctx.PM_135);
+ok("an empty bar says so", ctx.PM_BAR==="empty bar", ctx.PM_BAR);
+ok("225 lb is two 45s a side", /2×45/.test(ctx.PM_225||""), ctx.PM_225);
+ok("plate math is silent for non-barbell lifts", ctx.PM_CABLE===null, ctx.PM_CABLE);
+
+console.log("\nPRG-09/10 — calibration is the only cure for RIR sandbagging");
+run(`
+  S.settings=defaultSettings();
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  S.ex={}; S.diffs=[]; S.calibLast=null;
+  ESC = exState("cable_lat_raise");
+  ESC.load=nearestLoad(loadableSet(LIBX["cable_lat_raise"],S.settings.gym), toKg(40,"lb"));
+  ESC.seeded=true; ESC.sessions=9; ESC.target=ESC.lo;
+  BIAS_BEFORE = ESC.rirBias;
+  // he called it 2 RIR, then got 5 more reps: he under-reports by 3
+  ingestSession({date:"2026-02-02",week:"2026-W06",sets:[
+    {ex:"cable_lat_raise",load:ESC.load,reps:12,pReps:ESC.target,priorHard:0,hoursSince:72,
+     warmup:false,rom:1,assisted:0,rir:2,endpoint:"FAILED_CONCENTRIC",calibration:true,extraReps:5}
+  ]});
+  BIAS_AFTER = ESC.rirBias; CALIB_DATE = S.calibLast;
+  CALIB_SENTENCE = (S.diffs.slice(-1)[0]||{list:[]}).list.filter(d=>d.rule==="PRG-09").map(d=>d.sentence)[0]||"";
+`);
+ok("under-reporting raises rir_bias", ctx.BIAS_AFTER>ctx.BIAS_BEFORE, `${ctx.BIAS_BEFORE} -> ${ctx.BIAS_AFTER}`);
+ok("rir_bias stays clamped to [0,3]", ctx.BIAS_AFTER<=3.000001, ctx.BIAS_AFTER);
+ok("the calibration date is recorded", ctx.CALIB_DATE==="2026-02-02", ctx.CALIB_DATE);
+ok("it emits an explaining sentence", /more reps/.test(ctx.CALIB_SENTENCE), ctx.CALIB_SENTENCE);
+
+console.log("\nVOL-01 — warm-ups stay out of the ledger AND out of progression");
+run(`
+  S.settings=defaultSettings();
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  S.ex={}; S.diffs=[];
+  ESW = exState("lat_pulldown");
+  ESW.load=nearestLoad(loadableSet(LIBX["lat_pulldown"],S.settings.gym), toKg(100,"lb"));
+  ESW.seeded=true; ESW.sessions=9; ESW.target=ESW.lo;
+  WU_LOAD_BEFORE = ESW.load;
+  ingestSession({date:"2026-02-03",week:"2026-W06",sets:[
+    {ex:"lat_pulldown",load:ESW.load,reps:30,pReps:ESW.target,priorHard:0,hoursSince:72,
+     warmup:true,rom:1,assisted:0}
+  ]});
+  WU_LOAD_AFTER = ESW.load;
+`);
+ok("a 30-rep warm-up does not trigger a load jump", ctx.WU_LOAD_AFTER===ctx.WU_LOAD_BEFORE,
+   `${ctx.LB2(ctx.WU_LOAD_BEFORE)} -> ${ctx.LB2(ctx.WU_LOAD_AFTER)} lb`);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail?1:0);

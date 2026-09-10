@@ -517,7 +517,7 @@ function subsetSums(plates, maxKg){
 /* Per-profile ceilings. A single 400 kg cap let a cable stack offer 880 lb,
    which is not a weight that exists and makes the picker unusable. */
 const PROFILE_CAP_KG = { barbell:400, plate_machine:500, dumbbell_pair:75,
-  cable_stack:150, machine_stack:180, assisted:150, bodyweight:60 };
+  cable_stack:110, machine_stack:150, assisted:120, bodyweight:60 };
 function loadableSet(e, gym){
   const u = gym.unit, cap = PROFILE_CAP_KG[e.profile] || 200;
   const key = e.profile;
@@ -704,7 +704,20 @@ function rebuild(){
     else if(ev.type==="photo") S.photos.push(p);
     else if(ev.type==="irritation"){ S.irr[p.joint]={sev:p.sev,at:p.d,quality:p.quality||null}; }
     else if(ev.type==="set"){ (byDate[p.d]=byDate[p.d]||[]).push(p); }
-    else if(ev.type==="planStart"){ (S.plans[p.d]=S.plans[p.d]||{}).status="started"; }
+    else if(ev.type==="planStart"){
+      /* ENG-02: a started plan is never re-planned. That means the payload has
+         to be PERSISTED, not recomputed — logging sets changes weekly volume
+         credit, which can change slot selection, so a rebuild mid-session
+         would hand back a different session than the one being performed.
+         loadSet is stripped on write (it is large and derivable) and
+         rehydrated on read. */
+      const plan = Object.assign({}, p.plan||{}, {status:"started"});
+      if(Array.isArray(plan.slots)) plan.slots = plan.slots.map(sl=>{
+        const e=LIBX[sl.ex];
+        return Object.assign({}, sl, {loadSet: e ? loadableSet(e, S.settings.gym) : [0]});
+      });
+      S.plans[p.d] = plan;
+    }
   }
   // Ramp-in starts at ~60% of each muscle's budget share and climbs to it,
   // rather than from a flat number that may already exceed the share.
@@ -1050,6 +1063,51 @@ function fmtLoad(kg){ if(kg==null) return "—";
 function fmtL(e,kg){ if(kg==null) return "—";
   return (e.profile==="dumbbell_pair" && e.perSide ? "2 × " : "") + fmtLoad(kg); }
 
+/* ===================== PLATE MATH ==================================
+   Nobody should be doing arithmetic between sets. Greedy from the heaviest
+   pair down, bounded by how many pairs the gym actually owns — if the target
+   is not makeable from real plates it returns null rather than a lie, which
+   should never happen because every prescribed load is a member of the
+   loadable set by construction. */
+function plateMath(e, kg){
+  if(e.profile!=="barbell" || kg==null) return null;
+  const g=S.settings.gym;
+  let side=(kg-g.barKg)/2;
+  if(side < -0.01) return null;
+  if(side < 0.01) return "empty bar";
+  const plates=g.plates.map(p=>({w:toKg(p.w,g.unit), n:p.pairs, label:p.w})).sort((a,b)=>b.w-a.w);
+  const out=[];
+  for(const p of plates){
+    let c=0;
+    while(side >= p.w - 1e-6 && c < p.n){ side -= p.w; c++; }
+    if(c) out.push(c+"×"+p.label);
+  }
+  return side > 0.02 ? null : out.join(" + ") + " a side";
+}
+
+/* ===================== REST TIMER =================================
+   Rest is a constant, never autoregulated (FAI-02, Singer 2024: no detectable
+   hypertrophy difference beyond 90 s). So this counts, it does not decide. */
+const Rest = {
+  until:0, ex:null, tick:null,
+  start(exId, seconds){
+    this.until = Date.now() + seconds*1000; this.ex = exId;
+    if(!this.tick) this.tick = setInterval(()=>Rest.paint(), 1000);
+    this.paint();
+  },
+  left(){ return Math.max(0, Math.ceil((this.until - Date.now())/1000)); },
+  paint(){
+    const el = document.getElementById("resttimer");
+    const n = this.left();
+    if(!el){ if(!n && this.tick){ clearInterval(this.tick); this.tick=null; } return; }
+    if(n<=0){ el.textContent = "Rest done"; el.className = "pill ok";
+      if(this.tick){ clearInterval(this.tick); this.tick=null; } return; }
+    el.textContent = `Rest ${Math.floor(n/60)}:${String(n%60).padStart(2,"0")}`;
+    el.className = "pill";
+  },
+  clear(){ this.until=0; this.ex=null; if(this.tick){ clearInterval(this.tick); this.tick=null; } }
+};
+
 /* ======================= BODYWEIGHT TREND (PHA-*) ==================
    EWMA alpha 0.10, then OLS slope over a window forced to an exact
    multiple of 7 days so a weekly weighing rhythm cannot alias into the
@@ -1159,6 +1217,28 @@ function computeRestricted(){
   S.restricted = !!(heavy||hurt);
 }
 
+/* ============ PRG-10 — the calibration scheduler ==================
+   The ONLY observation that separates "you got stronger" from "you sandbag
+   your RIR". Without it those two are structurally confounded and rir_bias
+   sits on its +1.0 prior forever. Pooled underprediction of reps-to-failure
+   is 0.95 reps (95% CI 0.17-1.73), between-participant SD 1.45, and training
+   status does NOT moderate it — so there is no "he's experienced, skip it".
+   Placed only on a fail-safe isolation lift with clean joints, never in ramp. */
+function calibrationTarget(slots, ctx, date){
+  if(ctx.ramping || S.settings.screening!=="CLEAR") return null;
+  const since = S.calibLast ? daysBetween(S.calibLast, date) : 999;
+  if(since < K.CALIB_DAYS) return null;
+  for(const sl of slots){
+    const e=LIBX[sl.ex];
+    if(!e || !e.failSafe || e.cls!=="isolation") continue;
+    if(Object.keys(e.joints).some(j=>S.irr[j] && S.irr[j].sev>0)) continue;
+    const ms=S.mus[sl.muscle];
+    if(ms && ms.failWeek >= K.FAILURE_SHARE*ms.target) continue;
+    return sl.ex;
+  }
+  return null;
+}
+
 /* ======================== THE NIGHTLY PLANNER ======================
    Pure function of (state, local_date). Called on rollover and again at
    session start; the session-start call is the authoritative one because
@@ -1166,7 +1246,9 @@ function computeRestricted(){
    =================================================================== */
 function ensurePlan(date){
   const stored = S.plans[date];
-  if(stored && stored.status==="started") return stored;   // ENG-02 never mutate a started plan
+  // ENG-02 never re-plan a started session — but only honour a stored plan that
+  // actually carries one. A statusless stub must fall through and rebuild.
+  if(stored && stored.status==="started" && Array.isArray(stored.slots) && stored.slots.length) return stored;
   const p = buildPlan(date);
   S.plans[date] = Object.assign({status:"unstarted"}, p);
   return S.plans[date];
@@ -1279,6 +1361,18 @@ function buildPlan(date){
   /* --- order: index lifts first, unfailsafe never last-fatigued -- */
   slots.sort((a,b)=> (b.isIndex?1:0)-(a.isIndex?1:0) || (a.risk-b.risk));
   slots.forEach((s,i)=>s.pos=i+1);
+
+  const calib = calibrationTarget(slots, ctx, date);          // PRG-10
+  if(calib){ const sl=slots.find(x=>x.ex===calib); if(sl){ sl.calibration=true;
+    notes.push({rule:"PRG-10", text:`Last set of ${sl.name.toLowerCase()} is a calibration set today — stop where you normally would, tap your RIR, then keep going to a rep you can't finish. It's the only way I can tell "stronger" apart from "under-reporting".`}); } }
+
+  /* SEL-06: one heavy compound per Tier-A muscle is protected from the time
+     trim. Frequency is negligible for hypertrophy but significant for
+     strength, and the strength side is what these slots defend. */
+  for(const sl of slots){
+    const w=(S.settings.w||W_MALE)[sl.muscle]||0;
+    sl.protected = (w>=TIER_A && sl.cls!=="isolation") || sl.isIndex;
+  }
 
   /* --- hard floor: never below 1 working set per scheduled muscle */
   if(!slots.length && isTrainingDay && pool.length)
@@ -1532,6 +1626,7 @@ function syncBanner(){
 /* ------------------------------ TODAY ----------------------------- */
 function renderToday(){
   const date=todayISO(), p=ensurePlan(date);
+  if(!p.slots) p.slots=[];
   let h = syncBanner();
   if(S.restricted) h += `<div class="banner warn">You've been training very frequently, or training on a sore joint. I've capped this week and hidden the body numbers. If training is feeling compulsory rather than useful, that's worth talking to someone about.</div>`;
   if(p.blocked){
@@ -1585,28 +1680,37 @@ function renderToday(){
 /* ------------------------------ TRAIN ----------------------------- */
 function renderTrain(){
   const date=todayISO(), p=ensurePlan(date);
-  if(!p.slots.length){ $("#v-train").innerHTML=`<div class="empty">Nothing scheduled today.</div>`; return; }
+  if(!p || !Array.isArray(p.slots) || !p.slots.length){
+    $("#v-train").innerHTML=`<div class="empty">Nothing scheduled today.</div>`; return; }
   const logged={};
   for(const ev of S.events) if(ev.type==="set" && ev.payload.d===date)
     (logged[ev.payload.ex]=logged[ev.payload.ex]||[]).push(ev.payload);
 
   let h="";
   for(const s of p.slots){
-    const e=LIBX[s.ex], done=logged[s.ex]||[];
+    const e=LIBX[s.ex], all=logged[s.ex]||[];
+    // A warm-up is shown but never consumes a working-set slot, and never
+    // enters a ledger. Counting it as work would quietly cut the session.
+    const done=all.filter(x=>!x.warmup);
     const complete = done.length>=s.sets;
     h+=`<div class="card ${complete?"spine ok":""}">
       <div class="row"><div class="grow"><h3>${esc(s.name)}</h3>
       <div class="mini">${done.length}/${s.sets} sets · target ${s.reps} reps · ${s.rir} RIR${s.allowFailure?" (last set: to failure)":""}</div></div></div>`;
-    for(let i=0;i<done.length;i++){ const d=done[i];
-      h+=`<div class="setline"><span class="ix">${i+1}</span>
-        <span class="lg">${esc(fmtL(e,d.load))} × ${d.reps}</span>
+    let wi=0;
+    for(const d of all){
+      const isW=!!d.warmup; if(!isW) wi++;
+      h+=`<div class="setline"><span class="ix">${isW?"·":wi}</span>
+        <span class="lg"${isW?' style="opacity:.55"':""}>${esc(fmtL(e,d.load))} × ${d.reps}</span>
+        ${isW?`<span class="tag">warm-up</span>`:""}
         ${d.rir!=null?`<span class="tag">${d.rir} RIR</span>`:""}
         ${d.endpoint==="FAILED_CONCENTRIC"?`<span class="tag">failure</span>`:""}
+        ${d.calibration?`<span class="tag">calibration</span>`:""}
         ${d.rom===0?`<span class="tag">short ROM</span>`:""}</div>`;
     }
     if(!complete){
       const setIx=done.length+1, isLast=setIx>=s.sets;
       const cur = done.length?done[done.length-1].load : s.load;
+      const pm = plateMath(e, cur);
       h+=`<div class="rule"></div>
       <div class="row" style="margin-bottom:8px">
         <select data-load="${s.ex}" style="flex:1">${
@@ -1614,13 +1718,17 @@ function renderTrain(){
           ? `<option value="">Pick a weight you could do ~15 times</option>`+s.loadSet.map(v=>`<option value="${v}">${esc(fmtL(e,v))}</option>`).join("")
           : s.loadSet.map(v=>`<option value="${v}" ${Math.abs(v-(cur||0))<1e-6?"selected":""}>${esc(fmtL(e,v))}</option>`).join("")
         }</select>
+        ${Rest.ex===s.ex && Rest.left()>0 ? `<span class="pill" id="resttimer">Rest</span>` : ""}
       </div>
+      ${pm?`<p class="mini" style="margin:-2px 0 8px">${esc(pm)}</p>`:""}
       <div class="row" style="margin-bottom:8px">
         <button class="step" data-act="rep-" data-ex="${s.ex}">−</button>
-        <button class="btn primary big grow" data-act="logset" data-ex="${s.ex}" data-set="${setIx}" data-last="${isLast?1:0}">
+        <button class="btn primary big grow" data-act="logset" data-ex="${s.ex}" data-set="${setIx}" data-last="${isLast?1:0}" data-calib="${isLast&&s.calibration?1:0}">
           Log <span data-reps="${s.ex}">${s.needsSeed&&!done.length?8:s.reps}</span> reps</button>
         <button class="step" data-act="rep+" data-ex="${s.ex}">+</button>
       </div>
+      <button class="btn wide" data-act="warmup" data-ex="${s.ex}" style="margin-bottom:6px">Log a warm-up set</button>
+      ${isLast&&s.calibration?`<p class="why"><b>Calibration set.</b> Stop where you normally would and tap your RIR — then keep going until you can't finish a rep, and tell me how many more you got. This is the only thing that separates "you got stronger" from "you under-report".</p>`:""}
       ${s.needsSeed&&!done.length?`<p class="why">First time on this one. Pick a weight you're confident you could get about 15 times, then do 8. I'll work out your real working weight from that — no max testing, ever.</p>`:""}
       ${s.romSensitive&&s.romCue?`<p class="mini">${esc(s.romCue)}</p>`:""}`;
     }
@@ -1899,7 +2007,13 @@ function confirmSheet(title, body, yes){
   });
 }
 function closeSheet(){ const s=$("#sheet"); s.className="hide"; s.innerHTML=""; }
-let RIR_CB=null, END_CB=null;
+let RIR_CB=null, END_CB=null, EXTRA_CB=null;
+function askExtra(cb){
+  EXTRA_CB=cb;
+  sheet(`<h3>Now you've gone to failure — how many extra reps did you get?</h3>
+    <p class="sub">Past the point where you'd normally have stopped.</p>
+    <div class="chips" style="margin-top:12px">${[0,1,2,3,4,5,6].map(v=>`<button class="chip" data-act="extra" data-v="${v}" style="flex:1">${v}</button>`).join("")}</div>`);
+}
 function askRIR(cb){
   RIR_CB=cb;
   sheet(`<h3>How many more reps could you have done with good form?</h3>
@@ -1961,7 +2075,15 @@ async function handle(a,t,ev){
     return finishOnboard();
   }
   /* ---- session ---- */
-  case "start": await append("planStart",{d:todayISO()}); S.plans[todayISO()].status="started"; return go("train");
+  case "start": {
+    const d=todayISO(), plan=ensurePlan(d);
+    const slim = Object.assign({}, plan, {
+      slots: (plan.slots||[]).map(sl=>{ const c=Object.assign({}, sl); delete c.loadSet; return c; })
+    });
+    await append("planStart",{d, plan:slim});
+    S.plans[d] = Object.assign({}, plan, {status:"started"});
+    return go("train");
+  }
   case "rep+": case "rep-": {
     const id=t.dataset.ex, span=document.querySelector(`[data-reps="${CSS.escape(id)}"]`);
     let v=+span.textContent + (a==="rep+"?1:-1); v=Math.max(0,v);
@@ -1973,20 +2095,43 @@ async function handle(a,t,ev){
     if(sel && sel.value==="") return toast("Pick the weight first.");
     const load=+sel.value;
     const reps=+document.querySelector(`[data-reps="${CSS.escape(id)}"]`).textContent;
-    const commit=async(rir,endpoint)=>{
-      await commitSet(id, load, reps, rir, endpoint); closeSheet(); render();
+    const commit=async(rir,endpoint,extra)=>{
+      await commitSet(id, load, reps, rir, endpoint, extra); closeSheet();
+      Rest.start(id, (LIBX[id]||{}).rest || 120); render();
     };
+    const isCalib = t.dataset.calib==="1";
     if(!isLast) return commit(null,null);
     return askRIR(async(rir)=>{
+      if(isCalib) return askExtra(async(extra)=>commit(rir, "FAILED_CONCENTRIC", extra));
       if(rir===0) return askEndpoint(async(e)=>commit(0,e));
       return commit(rir, rir==null?null:"STOPPED_AT_RIR");
     });
   }
   case "rir": { const v=t.dataset.v; const cb=RIR_CB; RIR_CB=null; closeSheet(); return cb(v===""?null:+v); }
+  case "extra": { const cb=EXTRA_CB; EXTRA_CB=null; closeSheet(); return cb(+t.dataset.v); }
+  case "warmup": {
+    const id=t.dataset.ex, sel=document.querySelector(`[data-load="${CSS.escape(id)}"]`);
+    if(!sel || sel.value==="") return toast("Pick the weight first.");
+    // §5.7: never render an input control that cannot represent what actually
+    // happened. Warm-ups are excluded from every ledger and from progression,
+    // but refusing to record them would just push them into the working sets.
+    await append("set",{ d:todayISO(), ex:id, load:+sel.value,
+      reps:+document.querySelector(`[data-reps="${CSS.escape(id)}"]`).textContent,
+      rir:null, endpoint:null, warmup:true, rom:1, assisted:0, calibration:false,
+      priorHard:0, hoursSince:999, pos:1 });
+    Rest.start(id, 60); render(); return;
+  }
+  case "rpe": {
+    await append("sessionEnd",{d:todayISO(), rpe:t.dataset.v===""?null:+t.dataset.v});
+    closeSheet(); Rest.clear(); Sync.flush(); rebuild(); return go("today");
+  }
   case "endp": { const cb=END_CB; END_CB=null; closeSheet(); return cb(t.dataset.v); }
   case "endsession": {
-    await append("sessionEnd",{d:todayISO()});
-    Sync.flush(); rebuild(); return go("today");
+    sheet(`<h3>How hard was that session overall?</h3>
+      <p class="sub">One tap, or skip it. This is recorded, not acted on — nothing in the planner reads it yet.</p>
+      <div class="chips" style="margin-top:12px">${[2,4,6,8,10].map(v=>`<button class="chip" data-act="rpe" data-v="${v}" style="flex:1">${v}</button>`).join("")}</div>
+      <button class="btn wide" data-act="rpe" data-v="" style="margin-top:10px">Skip</button>`);
+    return;
   }
   /* ---- body ---- */
   case "logbw": { const v=+$("#bwin").value; if(!v) return;
@@ -2075,7 +2220,7 @@ async function handle(a,t,ev){
   }
 }
 
-async function commitSet(exId, load, reps, rir, endpoint){
+async function commitSet(exId, load, reps, rir, endpoint, extraReps){
   const e=LIBX[exId], date=todayISO(), plan=S.plans[date];
   const slot=plan.slots.find(s=>s.ex===exId);
   // inputs to the fatigue-aware expectation, measured not assumed
@@ -2100,7 +2245,8 @@ async function commitSet(exId, load, reps, rir, endpoint){
     endpoint: endpoint || (rir===0?"FAILED_CONCENTRIC":null),
     pReps: slot?slot.reps:reps, pLoad: slot?slot.load:load, pRir: slot?slot.rir:null,
     priorHard: r1(priorHard), hoursSince: Math.round(hoursSince),
-    pos: slot?slot.pos:1, warmup:false, rom:1, assisted:0, calibration:false });
+    pos: slot?slot.pos:1, warmup:false, rom:1, assisted:0,
+    calibration: !!(slot&&slot.calibration), extraReps: extraReps==null?null:extraReps });
   await canaryWrite(S.events.length);
 }
 
