@@ -294,5 +294,48 @@ ok("tiers are populated", ctx.CFG_TIERS>=2, ctx.CFG_TIERS);
 ok("indirect-only groups start at maintenance", ctx.CFG_NODIRECT_TIER===true);
 ok("the shipped weight vector is legal", ctx.CFG_W_LEGAL===true);
 
+console.log("\nCAP-01 — 'short on time' trims sets before exercises, never an index lift");
+run(`
+  S.settings=defaultSettings(); S.planEdits={};
+  const mk=(ex,muscle,sets,isIndex)=>({ex,muscle,sets,isIndex,protected:isIndex,
+    name:LIBX[ex].name,cls:LIBX[ex].cls,reps:8,rir:2,loadSet:[10],load:10,band:[6,10]});
+  BIGPLAN = { date:"2026-03-02", minutes:90, notes:[], slots:[
+    mk("lat_pulldown","lats",4,true),
+    mk("cable_lat_raise","delts_side",4,true),
+    mk("leg_extension","quads",4,false),
+    mk("cable_curl","biceps",4,false),
+    mk("seated_calf","calves",4,false) ]};
+  BEFORE_SETS = BIGPLAN.slots.map(s=>s.sets).join(",");
+  S.planEdits["2026-03-02"]=[{d:"2026-03-02",op:"time",minutes:30}];
+  CUT = applyPlanEdits(BIGPLAN, "2026-03-02");
+  AFTER_SETS = CUT.slots.map(s=>s.muscle+":"+s.sets).join(" ");
+  INDEX_KEPT = CUT.slots.filter(s=>s.isIndex).length;
+  CUT_MINUTES = CUT.minutes;
+  TOTAL_AFTER = CUT.slots.reduce((a,s)=>a+s.sets,0);
+  CUT_NOTE = (CUT.notes||[]).filter(n=>n.rule==="CAP-01").length;
+`);
+ok("total sets actually came down", ctx.TOTAL_AFTER < 20, ctx.TOTAL_AFTER+" from 20");
+ok("both index lifts survived", ctx.INDEX_KEPT===2, ctx.INDEX_KEPT);
+ok("the trimmed plan reports its real length", ctx.CUT_MINUTES<=32, ctx.CUT_MINUTES+" min");
+ok("it emits an explaining note", ctx.CUT_NOTE>0);
+ok("low-priority muscles gave up sets first", /calves:1|quads:1/.test(ctx.AFTER_SETS), ctx.AFTER_SETS);
+
+console.log("\nCorrections — a voided set leaves the ledger AND the screen");
+run(`
+  S.events=[
+    {id:1,type:"settings",d:"2026-03-01",payload:{}},
+    {id:2,type:"set",d:"2026-03-01",payload:{d:"2026-03-01",ex:"lat_pulldown",load:45,reps:8,warmup:false,rom:1,assisted:0}},
+    {id:3,type:"set",d:"2026-03-01",payload:{d:"2026-03-01",ex:"lat_pulldown",load:45,reps:99,warmup:false,rom:1,assisted:0}},
+    {id:4,type:"voidSet",d:"2026-03-01",payload:{id:3}}
+  ];
+  rebuild();
+  VOID_N = S.voided.size;
+  SESS_SETS = (S.sessions[0]||{sets:[]}).sets.length;
+  HAS_99 = (S.sessions[0]||{sets:[]}).sets.some(x=>x.reps===99);
+`);
+ok("the void list is rebuilt from the log", ctx.VOID_N===1, ctx.VOID_N);
+ok("the corrected set is gone from the session", ctx.SESS_SETS===1, ctx.SESS_SETS);
+ok("the bad number never reaches the ledger", ctx.HAS_99===false);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail?1:0);

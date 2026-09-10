@@ -73,7 +73,7 @@ nav{
   position:fixed;left:0;right:0;bottom:0;z-index:50;
   background:var(--surface);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom);
-  display:grid;grid-template-columns:repeat(5,1fr);
+  display:grid;grid-template-columns:repeat(4,1fr);
 }
 nav button{
   appearance:none;border:0;background:none;color:var(--ink3);
@@ -156,6 +156,9 @@ label.fld>span{display:block;font:600 12.5px/1.3 var(--sans);color:var(--ink2);m
 .sheet{position:fixed;inset:0;z-index:100;background:rgba(8,11,18,.55);display:flex;align-items:flex-end;justify-content:center}
 .sheet .inner{background:var(--surface);width:100%;max-width:560px;border-radius:16px 16px 0 0;padding:18px 16px calc(18px + env(safe-area-inset-bottom));max-height:88vh;overflow:auto}
 .scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch}
+summary{cursor:pointer;min-height:var(--tap);display:flex;align-items:center;font-size:15px}
+summary::-webkit-details-marker{color:var(--ink3)}
+details[open] summary{margin-bottom:2px}
 table{border-collapse:collapse;width:100%;font-size:14px}
 th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line)}
 th{font:600 11px/1 var(--sans);text-transform:uppercase;letter-spacing:.05em;color:var(--ink3)}
@@ -177,16 +180,14 @@ td.n{font-family:var(--mono);text-align:right}
 <main>
   <div id="boot" class="empty">Loading…</div>
 
-  <section class="view" id="v-today" aria-label="Today"></section>
-  <section class="view" id="v-train" aria-label="Session"></section>
+  <section class="view" id="v-session" aria-label="Today's session"></section>
   <section class="view" id="v-log"   aria-label="Progress"></section>
   <section class="view" id="v-body"  aria-label="Body"></section>
   <section class="view" id="v-setup" aria-label="Setup"></section>
 </main>
 
 <nav id="tabs" class="hide">
-  <button data-v="today" aria-current="true"><span class="g">◆</span>Today</button>
-  <button data-v="train"><span class="g">▲</span>Train</button>
+  <button data-v="session" aria-current="true"><span class="g">◆</span>Today</button>
   <button data-v="log"><span class="g">▤</span>Progress</button>
   <button data-v="body"><span class="g">◑</span>Body</button>
   <button data-v="setup"><span class="g">⚙</span>Setup</button>
@@ -655,7 +656,8 @@ function dow(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(y,m
 
 /* ============================ STATE ================================ */
 const S = { events:[], settings:null, ex:{}, mus:{}, irr:{}, sessions:[], bw:[], photos:[],
-            waist:[], diffs:[], plans:{}, redflag:false, calibLast:null, restricted:false,
+            waist:[], diffs:[], plans:{}, planEdits:{}, voided:new Set(),
+            redflag:false, calibLast:null, restricted:false,
             phaseSince:null };
 
 /* ===================== SINGLE-USER CONFIGURATION ==================
@@ -711,13 +713,18 @@ function emit(list, field, oldV, newV, triggerVar, triggerVal, ruleId, sentence)
 
 function rebuild(){
   S.settings = defaultSettings(); S.ex={}; S.mus={}; S.irr={}; S.sessions=[]; S.bw=[];
-  S.photos=[]; S.waist=[]; S.diffs=[]; S.plans={}; S.redflag=false; S.calibLast=null; S.phaseSince=null;
+  S.photos=[]; S.waist=[]; S.diffs=[]; S.plans={}; S.planEdits={}; S.redflag=false; S.calibLast=null; S.phaseSince=null;
   for(const m of MUSCLES) S.mus[m]=newMuscleState();
   for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
 
   const byDate = {};
+  const voided = new Set();
+  for(const ev of S.events) if(ev.type==="voidSet") voided.add(ev.payload.id);
+  S.voided = voided;   // the VIEW must filter identically to the ledger, or a
+                       // correction shows up as an extra set on the screen
   for(const ev of S.events){
     const p=ev.payload;
+    if(ev.type==="set" && voided.has(ev.id)) continue;   // corrected, not deleted
     if(ev.type==="settings"){
       if(p.phase && p.phase!==S.settings.phase) S.phaseSince = ev.d;
       Object.assign(S.settings, p);
@@ -727,7 +734,8 @@ function rebuild(){
     else if(ev.type==="weight") S.bw.push({d:p.d,kg:p.kg});
     else if(ev.type==="photo") S.photos.push(p);
     else if(ev.type==="irritation"){ S.irr[p.joint]={sev:p.sev,at:p.d,quality:p.quality||null}; }
-    else if(ev.type==="set"){ (byDate[p.d]=byDate[p.d]||[]).push(p); }
+    else if(ev.type==="set"){ p._id=ev.id; (byDate[p.d]=byDate[p.d]||[]).push(p); }
+    else if(ev.type==="planEdit"){ (S.planEdits[p.d]=S.planEdits[p.d]||[]).push(p); }
     else if(ev.type==="planStart"){
       /* ENG-02: a started plan is never re-planned. That means the payload has
          to be PERSISTED, not recomputed — logging sets changes weekly volume
@@ -1125,7 +1133,9 @@ const Rest = {
     const n = this.left();
     if(!el){ if(!n && this.tick){ clearInterval(this.tick); this.tick=null; } return; }
     if(n<=0){ el.textContent = "Rest done"; el.className = "pill ok";
-      if(this.tick){ clearInterval(this.tick); this.tick=null; } return; }
+      if(this.tick){ clearInterval(this.tick); this.tick=null;
+        if(navigator.vibrate) try{ navigator.vibrate([120,80,120]); }catch(e){} }
+      return; }
     el.textContent = `Rest ${Math.floor(n/60)}:${String(n%60).padStart(2,"0")}`;
     el.className = "pill";
   },
@@ -1274,8 +1284,9 @@ function ensurePlan(date){
   const stored = S.plans[date];
   // ENG-02 never re-plan a started session — but only honour a stored plan that
   // actually carries one. A statusless stub must fall through and rebuild.
-  if(stored && stored.status==="started" && Array.isArray(stored.slots) && stored.slots.length) return stored;
-  const p = buildPlan(date);
+  if(stored && stored.status==="started" && Array.isArray(stored.slots) && stored.slots.length)
+    return applyPlanEdits(stored, date);
+  const p = applyPlanEdits(buildPlan(date), date);
   S.plans[date] = Object.assign({status:"unstarted"}, p);
   return S.plans[date];
 }
@@ -1623,8 +1634,100 @@ The training log is NOT encrypted, on purpose. log/**.ndjson is one JSON
 object per line and needs no key, no tool, and no running app.
 `;
 
+/* ================= SESSION HELPERS (the useful bits) ==============
+   What a lifter actually needs mid-set: what they did last time, a way out
+   when the machine is taken, and a way to fix a mistyped number. The first
+   is the highest-value line of text a training app can render; the second is
+   the single most-repeated complaint about every adaptive app in the field —
+   a plan that assumes the gym is empty is a plan that dies at 5pm.
+   ================================================================== */
+function lastPerformance(exId, beforeDate){
+  for(let i=S.sessions.length-1;i>=0;i--){
+    const sess=S.sessions[i];
+    if(sess.date>=beforeDate) continue;
+    const sets=sess.sets.filter(x=>x.ex===exId && !x.warmup);
+    if(sets.length) return {date:sess.date, sets};
+  }
+  return null;
+}
+/* Substitutes must be REAL substitutes: same muscle as a prime mover, present
+   in this gym, and not already in today's session. Ordered so the cleanest
+   autoregulation signal comes first — a machine you can fail on safely beats a
+   free-weight variant whose numbers are noisier. */
+function alternativesFor(exId, muscle, usedIds){
+  const cur=LIBX[exId];
+  const score = e => (1/Math.max(0.01, relIncrementOf(e))) + (2-e.stability) + (e.failSafe?2:0);
+  return LIB.filter(e=> e.id!==exId && available(e) && !usedIds.includes(e.id)
+      && (e.contributions[muscle]||0) >= (cur && (cur.contributions[muscle]||0)>=1 ? 1 : 0.5))
+    .sort((a,b)=> score(b)-score(a))
+    .slice(0,4);
+}
+function relIncrementOf(e){
+  const set=loadableSet(e, S.settings.gym);
+  if(set.length<2) return 1;
+  const mid=set[Math.floor(set.length/3)] || set[0];
+  const nx=nextLoad(set, mid);
+  return nx ? (nx-mid)/mid : 1;
+}
+/* Plan edits are events, so a swap or a time cut is as auditable as a load
+   change and survives a reload like everything else. */
+function applyPlanEdits(plan, date){
+  for(const ed of (S.planEdits[date]||[])){
+    if(ed.op==="swap"){
+      const i=plan.slots.findIndex(s=>s.ex===ed.from);
+      if(i<0) continue;
+      const e=LIBX[ed.to]; if(!e) continue;
+      const es=exState(ed.to);
+      const old=plan.slots[i];
+      plan.slots[i]=Object.assign({}, old, { ex:e.id, name:e.name, cls:e.cls,
+        loadSet: loadableSet(e, S.settings.gym), load: es.load,
+        reps: es.target||e.band[0], band:[es.lo,es.hiEff], rest:e.rest,
+        needsSeed: es.load==null, romSensitive:e.romSensitive, romCue:e.romCue,
+        isIndex:false, calibration:false, substitutedFrom:ed.from, subReason:ed.reason });
+    } else if(ed.op==="time"){
+      /* CAP-01 order matters. Trim SETS from the least visually-weighted
+         muscles first — a set is the cheapest thing to give back, and the
+         evidence for the marginal set is much weaker than for the exercise
+         existing at all. Only once every non-index lift is down to one set do
+         whole exercises come off, and an index lift never does: it is the
+         measurement instrument, and dropping it blinds the planner.
+         Silently doing nothing would be the worst outcome, so if the budget
+         still cannot be met the plan says so rather than pretending. */
+      const w = S.settings.w || W_MALE;
+      const cost = sl => { const e=LIBX[sl.ex]; return (e?e.setup:45) + sl.sets*((e?e.rest:120)+32); };
+      const total = () => plan.slots.reduce((a,b)=>a+cost(b),0);
+      const budget = ed.minutes*60;
+      let guard=0;
+      while(total() > budget && guard++ < 60){
+        const trimmable = plan.slots.filter(sl=>sl.sets>1)
+          .sort((a,b)=>(w[a.muscle]||0)-(w[b.muscle]||0));
+        if(trimmable.length){ trimmable[0].sets -= 1; continue; }
+        const droppable = plan.slots.filter(sl=>!sl.isIndex && !sl.protected)
+          .sort((a,b)=>(w[a.muscle]||0)-(w[b.muscle]||0));
+        if(!droppable.length) break;
+        plan.slots = plan.slots.filter(sl=>sl!==droppable[0]);
+      }
+      plan.minutes = Math.round(total()/60);
+      plan.timeCut = ed.minutes;
+      if(plan.minutes > ed.minutes){
+        (plan.notes=plan.notes||[]).push({rule:"CAP-01",
+          text:`Trimmed as far as it goes — this is ${plan.minutes} minutes, not ${ed.minutes}. What's left is one set of each index lift, and those are the measurements the whole plan runs on. Cutting further would blind it.`});
+      } else {
+        (plan.notes=plan.notes||[]).push({rule:"CAP-01",
+          text:`Cut to about ${plan.minutes} minutes. Sets came off your lowest-priority muscles first; the index lifts are untouched.`});
+      }
+    } else if(ed.op==="sets"){
+      const sl=plan.slots.find(s=>s.ex===ed.ex);
+      if(sl) sl.sets=Math.max(1, Math.min(8, ed.sets));
+    } else if(ed.op==="drop"){
+      plan.slots = plan.slots.filter(s=>s.ex!==ed.ex);
+    }
+  }
+  return plan;
+}
+
 /* ============================== UI ================================ */
-let VIEW="today";
+let VIEW="session";
 const $ = s=>document.querySelector(s);
 const esc = s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 let LIVE = null;   // {date, logged:{exId:[...]}} for the in-progress session
@@ -1636,7 +1739,7 @@ function render(){
   $("#topdate").textContent = new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
   $("#v-"+VIEW).classList.add("on");
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current", b.dataset.v===VIEW?"true":"false"));
-  ({today:renderToday, train:renderTrain, log:renderLog, body:renderBody, setup:renderSetup})[VIEW]();
+  ({session:renderSession, log:renderLog, body:renderBody, setup:renderSetup})[VIEW]();
 }
 function go(v){ VIEW=v; render(); window.scrollTo(0,0); }
 
@@ -1648,99 +1751,77 @@ function syncBanner(){
   return "";
 }
 
-/* ------------------------------ TODAY ----------------------------- */
-function renderToday(){
+/* --------------------------- THE SESSION ---------------------------
+   One screen. The plan and the logging surface were two views describing the
+   same thing, which meant every set cost a tab switch and the "start" button
+   was a ceremony with no purpose. Now the session IS the home screen.
+
+   Rule ids live behind a disclosure rather than on the face of it: they are
+   how you audit a decision you distrust, not how you read a workout.
+   ------------------------------------------------------------------- */
+function renderSession(){
   const date=todayISO(), p=ensurePlan(date);
-  if(!p.slots) p.slots=[];
   let h = syncBanner();
-  if(S.settings.firstRun){
-    const days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-    h+=`<div class="card spine pri"><h3>Set up for you already</h3>
-      <p class="sub">No questionnaire — you've answered all of this. Everything here is editable in <b>Setup</b>.</p>
-      <p class="why"><b>Berkeley RSF</b> · ${S.settings.days.map(d=>days[d]).join(", ")} · cutting · no session time cap</p>
-      <p class="why"><b>Priorities</b> lats, side delts and chest carry the most volume; traps and front delts get no direct sets and clear their floor on indirect work.</p>
-      <p class="why"><b>First 3 weeks</b> are a ramp-in: capped sets, 3 reps in reserve, no failure sets. Loads get measured on your first exposure to each lift — you'll never be asked to test a max.</p>
-      <button class="btn wide" data-act="dismissfirst" style="margin-top:8px">Got it</button></div>`;
-  }
-  if(S.restricted) h += `<div class="banner warn">You've been training very frequently, or training on a sore joint. I've capped this week and hidden the body numbers. If training is feeling compulsory rather than useful, that's worth talking to someone about.</div>`;
+
+  if(S.settings.firstRun) h += firstRunCard();
+  if(S.restricted) h += `<div class="banner warn">You've been training very frequently, or training on a sore joint. This week is capped and the body numbers are hidden. If training is feeling compulsory rather than useful, that's worth talking to someone about.</div>`;
+
   if(p.blocked){
-    $("#v-today").innerHTML = h + `<div class="card"><h2>Not planning a session</h2><p class="sub">${esc(p.reason)}</p>
-      <button class="btn wide" data-act="unblock">I've been cleared — unblock</button></div>`;
+    $("#v-session").innerHTML = h + `<div class="card"><h2>Not planning a session</h2>
+      <p class="sub">${esc(p.reason)}</p>
+      <button class="btn wide" data-act="unblock">A clinician has cleared me</button></div>`;
     return;
   }
-  const started = S.plans[date] && S.plans[date].status==="started";
-  const loggedToday = S.events.filter(e=>e.type==="set" && e.payload.d===date).length;
 
-  h += `<div class="card">
-    <div class="row"><h2 class="grow">${p.slots.length?"Today's session":"Rest day"}</h2>
-    ${p.slots.length?`<span class="pill">${p.minutes} min</span>`:""}</div>`;
-  if(p.ramping) h+=`<p class="sub">Ramp-in period: capped sets, 3 reps in reserve, no failure sets.</p>`;
-  if(S.settings.phase==="CUT") h+=`<p class="sub">You're cutting — volume is held, not chased. The job right now is keeping what you have.</p>`;
-  if(!p.slots.length) h+=`<p class="sub">Nothing scheduled. Muscles need 48 hours between hard sessions.</p>`;
-  h+=`</div>`;
-
-  for(const s of p.slots){
-    const e=LIBX[s.ex];
-    h+=`<div class="card tight spine ${s.isIndex?"pri":""}">
-      <div class="row"><div class="grow"><h3>${esc(s.name)}</h3>
-        <div class="mini">${MUSCLE_LABEL[s.muscle]}${s.isIndex?" · index lift":""}</div></div>
-        ${s.allowFailure?`<span class="pill warn">last set to failure</span>`:`<span class="pill">${s.rir} RIR</span>`}</div>
-      <div class="row" style="margin-top:8px">
-        <div class="bigload">${s.needsSeed?"—":esc(fmtL(e,s.load))}</div>
-        <div class="grow mini">${s.sets} × ${s.reps} reps${s.needsSeed?" · first time: we'll measure it":""}</div>
-      </div>
-      ${s.irritated.length?`<p class="why"><b>${esc(s.irritated.join(", "))} flagged</b> — kept away from failure.</p>`:""}
-    </div>`;
-  }
-  for(const n of p.notes) h+=`<p class="why"><b>${esc(n.rule)}</b> ${esc(n.text)}</p>`;
-
-  const adv = phaseAdvice();
-  if(adv.length){
-    h+=`<div class="card"><h3>Coach notes</h3>`;
-    for(const a of adv) h+=`<p class="why"><b>${esc(a.rule)}</b> ${esc(a.text)}</p>`;
-    h+=`</div>`;
-  }
-  const yd = S.diffs.slice(-6).reverse();
-  if(yd.length){
-    h+=`<div class="card"><h3>What changed and why</h3>`;
-    for(const grp of yd) for(const d of grp.list)
-      h+=`<p class="why"><b>${esc(d.rule)}</b> ${esc(d.sentence)}</p>`;
-    h+=`</div>`;
-  }
-  if(p.slots.length) h+=`<div class="dock"><button class="btn primary wide big" data-act="start">${started||loggedToday?"Continue session":"Start session"}</button></div>`;
-  $("#v-today").innerHTML=h;
-}
-
-/* ------------------------------ TRAIN ----------------------------- */
-function renderTrain(){
-  const date=todayISO(), p=ensurePlan(date);
-  if(!p || !Array.isArray(p.slots) || !p.slots.length){
-    $("#v-train").innerHTML=`<div class="empty">Nothing scheduled today.</div>`; return; }
   const logged={};
-  for(const ev of S.events) if(ev.type==="set" && ev.payload.d===date)
-    (logged[ev.payload.ex]=logged[ev.payload.ex]||[]).push(ev.payload);
+  for(const ev of S.events) if(ev.type==="set" && ev.payload.d===date && !S.voided.has(ev.id))
+    (logged[ev.payload.ex]=logged[ev.payload.ex]||[]).push(Object.assign({_id:ev.id}, ev.payload));
 
-  let h="";
+  if(!p.slots.length){
+    const next = nextTrainingDay(date);
+    $("#v-session").innerHTML = h + `<div class="card"><h2>Rest day</h2>
+      <p class="sub">Nothing due. Muscles need 48 hours between hard sessions, and the sets you've already banked this week are what count.</p>
+      ${next?`<p class="sub">Next session: <b>${esc(next)}</b>.</p>`:""}
+      <button class="btn wide" data-act="trainanyway">I want to train anyway</button></div>`
+      + coachCard(p);
+    return;
+  }
+
+  const doneCount = p.slots.filter(s=>(logged[s.ex]||[]).filter(x=>!x.warmup).length >= s.sets).length;
+  h += `<div class="card">
+    <div class="row"><div class="grow">
+      <h2>${doneCount?`${doneCount} of ${p.slots.length} done`:"Today"}</h2>
+      <div class="sub">${esc(sessionLine(p))}</div></div>
+      <button class="btn" data-act="timecut">Short on time</button></div></div>`;
+
   for(const s of p.slots){
     const e=LIBX[s.ex], all=logged[s.ex]||[];
-    // A warm-up is shown but never consumes a working-set slot, and never
-    // enters a ledger. Counting it as work would quietly cut the session.
     const done=all.filter(x=>!x.warmup);
     const complete = done.length>=s.sets;
-    h+=`<div class="card ${complete?"spine ok":""}">
-      <div class="row"><div class="grow"><h3>${esc(s.name)}</h3>
-      <div class="mini">${done.length}/${s.sets} sets · target ${s.reps} reps · ${s.rir} RIR${s.allowFailure?" (last set: to failure)":""}</div></div></div>`;
+    const last = lastPerformance(s.ex, date);
+    h+=`<div class="card ${complete?"spine ok":s.isIndex?"spine pri":""}">
+      <div class="row"><div class="grow">
+        <h3>${esc(s.name)}</h3>
+        <div class="mini">${MUSCLE_LABEL[s.muscle]} · ${s.sets} × ${s.reps}${s.allowFailure?" · last set to failure":` · ${s.rir} in reserve`}</div>
+      </div>${complete?`<span class="pill ok">done</span>`:""}</div>`;
+
+    if(last) h+=`<p class="mini" style="margin-top:6px">Last time · ${last.sets.map(x=>x.reps).join(", ")} reps at ${esc(fmtL(e,last.sets[0].load))}</p>`;
+    if(s.substitutedFrom) h+=`<p class="mini">Swapped in for ${esc((LIBX[s.substitutedFrom]||{}).name||s.substitutedFrom)}.</p>`;
+    if(s.irritated && s.irritated.length) h+=`<p class="mini">${esc(s.irritated.join(", "))} flagged — kept away from failure.</p>`;
+
     let wi=0;
     for(const d of all){
       const isW=!!d.warmup; if(!isW) wi++;
-      h+=`<div class="setline"><span class="ix">${isW?"·":wi}</span>
+      h+=`<button class="setline" data-act="editset" data-id="${d._id}" style="width:100%;border:0;background:none;text-align:left;cursor:pointer">
+        <span class="ix">${isW?"·":wi}</span>
         <span class="lg"${isW?' style="opacity:.55"':""}>${esc(fmtL(e,d.load))} × ${d.reps}</span>
         ${isW?`<span class="tag">warm-up</span>`:""}
-        ${d.rir!=null?`<span class="tag">${d.rir} RIR</span>`:""}
+        ${d.rir!=null?`<span class="tag">${d.rir} left</span>`:""}
         ${d.endpoint==="FAILED_CONCENTRIC"?`<span class="tag">failure</span>`:""}
         ${d.calibration?`<span class="tag">calibration</span>`:""}
-        ${d.rom===0?`<span class="tag">short ROM</span>`:""}</div>`;
+        <span class="grow"></span><span class="mini">edit</span></button>`;
     }
+
     if(!complete){
       const setIx=done.length+1, isLast=setIx>=s.sets;
       const cur = done.length?done[done.length-1].load : s.load;
@@ -1749,7 +1830,7 @@ function renderTrain(){
       <div class="row" style="margin-bottom:8px">
         <select data-load="${s.ex}" style="flex:1">${
           s.needsSeed && !done.length
-          ? `<option value="">Pick a weight you could do ~15 times</option>`+s.loadSet.map(v=>`<option value="${v}">${esc(fmtL(e,v))}</option>`).join("")
+          ? `<option value="">Pick a weight you could do about 15 times</option>`+s.loadSet.map(v=>`<option value="${v}">${esc(fmtL(e,v))}</option>`).join("")
           : s.loadSet.map(v=>`<option value="${v}" ${Math.abs(v-(cur||0))<1e-6?"selected":""}>${esc(fmtL(e,v))}</option>`).join("")
         }</select>
         ${Rest.ex===s.ex && Rest.left()>0 ? `<span class="pill" id="resttimer">Rest</span>` : ""}
@@ -1761,22 +1842,69 @@ function renderTrain(){
           Log <span data-reps="${s.ex}">${s.needsSeed&&!done.length?8:s.reps}</span> reps</button>
         <button class="step" data-act="rep+" data-ex="${s.ex}">+</button>
       </div>
-      <button class="btn wide" data-act="warmup" data-ex="${s.ex}" style="margin-bottom:6px">Log a warm-up set</button>
-      ${isLast&&s.calibration?`<p class="why"><b>Calibration set.</b> Stop where you normally would and tap your RIR — then keep going until you can't finish a rep, and tell me how many more you got. This is the only thing that separates "you got stronger" from "you under-report".</p>`:""}
-      ${s.needsSeed&&!done.length?`<p class="why">First time on this one. Pick a weight you're confident you could get about 15 times, then do 8. I'll work out your real working weight from that — no max testing, ever.</p>`:""}
+      <div class="chips">
+        <button class="chip" data-act="warmup" data-ex="${s.ex}" style="flex:1;font-weight:500">Warm-up</button>
+        <button class="chip" data-act="swap" data-ex="${s.ex}" data-m="${s.muscle}" style="flex:1;font-weight:500">Swap</button>
+        <button class="chip" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}" style="flex:1;font-weight:500">+ set</button>
+      </div>
+      ${isLast&&s.calibration?`<p class="why">Calibration set. Stop where you normally would and tap how many you had left — then keep going until you can't finish a rep, and tell me how many extra you got. It's the only thing that tells "you got stronger" apart from "you under-report".</p>`:""}
+      ${s.needsSeed&&!done.length?`<p class="why">First time on this one. Pick a weight you're confident you'd get about 15 times, then do 8. I'll work your real working weight out from that — you'll never be asked to test a max.</p>`:""}
       ${s.romSensitive&&s.romCue?`<p class="mini">${esc(s.romCue)}</p>`:""}`;
     }
     h+=`</div>`;
   }
-  h+=`<div class="card"><button class="btn wide" data-act="endsession">End session</button></div>`;
-  $("#v-train").innerHTML=h;
+
+  h += coachCard(p);
+  h += `<div class="dock"><button class="btn primary wide big" data-act="endsession">Finish session</button></div>`;
+  $("#v-session").innerHTML=h;
 }
 
+function sessionLine(p){
+  const bits=[];
+  bits.push(`${p.minutes} min`);
+  if(p.ramping) bits.push("ramp-in: lighter on purpose");
+  else if(S.settings.phase==="CUT") bits.push("holding volume while you cut");
+  return bits.join(" · ");
+}
+function nextTrainingDay(date){
+  const days=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  for(let i=1;i<=7;i++){ const d=addDays(date,i); if(S.settings.days.includes(dow(d))) return days[dow(d)]; }
+  return null;
+}
+function firstRunCard(){
+  const days=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  return `<div class="card spine pri"><h3>Already set up for you</h3>
+    <p class="sub">No questionnaire — you've answered all of it. Change anything in Setup.</p>
+    <p class="mini">Berkeley RSF · ${S.settings.days.map(d=>days[d]).join(", ")} · cutting · no time cap</p>
+    <p class="mini">First three weeks are deliberately easy: fewer sets, three reps left in the tank, nothing to failure. Loads get measured the first time you touch each lift.</p>
+    <button class="btn wide" data-act="dismissfirst" style="margin-top:8px">Got it</button></div>`;
+}
+/* Everything the planner decided, in plain sentences, folded away. The rule
+   ids are in there for when you distrust a number — not on the face of it. */
+function coachCard(p){
+  const adv = phaseAdvice().filter(a=>a.kind!=="info" || a.rule==="PHA-02" || a.rule==="PHA-05");
+  const recent = S.diffs.slice(-4).reverse().flatMap(g=>g.list);
+  const notes = (p.notes||[]);
+  if(!adv.length && !recent.length && !notes.length) return "";
+  let h=`<div class="card"><h3>Why it looks like this</h3>`;
+  for(const a of adv) h+=`<p class="why">${esc(a.text)}</p>`;
+  if(recent.length||notes.length){
+    h+=`<details style="margin-top:6px"><summary class="mini" style="cursor:pointer">Every change, with its rule</summary>`;
+    for(const n of notes) h+=`<p class="why"><b>${esc(n.rule)}</b> ${esc(n.text)}</p>`;
+    for(const d of recent) h+=`<p class="why"><b>${esc(d.rule)}</b> ${esc(d.sentence)}</p>`;
+    h+=`</details>`;
+  }
+  return h+`</div>`;
+}
+
+
 /* --------------------------- PROGRESS ----------------------------- */
+const LADDER_LABEL = { RAMP:"easing in", BUILD:"adding", HOLD:"steady",
+  PROBE:"testing fewer", DELOAD:"recovering", MAINTAIN:"holding" };
 function renderLog(){
   let h="";
-  const exIds=[...new Set(S.events.filter(e=>e.type==="set").map(e=>e.payload.ex))];
-  h+=`<div class="card"><h3>Weekly sets by muscle</h3><p class="mini">Fractional sets. Bar = logged this week, number = target.</p>`;
+  const exIds=[...new Set(S.events.filter(e=>e.type==="set" && !S.voided.has(e.id)).map(e=>e.payload.ex))];
+  h+=`<div class="card"><h3>This week</h3><p class="mini">Sets done against sets planned. A set on a machine that hits two muscles counts as a whole one for the main muscle and half for the other.</p>`;
   for(const m of MUSCLES){ const ms=S.mus[m];
     if(ms.fsWeek===0 && ms.target===K.FS_START) continue;
     const w=Math.min(100, 100*ms.fsWeek/Math.max(1,ms.target));
@@ -1784,7 +1912,7 @@ function renderLog(){
       <div style="height:6px;background:var(--sunken);border-radius:3px;margin-top:4px">
       <div style="height:6px;width:${w}%;background:var(--accent);border-radius:3px"></div></div></span>
       <span class="lg">${r1(ms.fsWeek)}/${r1(ms.target)}</span>
-      <span class="tag">${ms.ladder}</span></div>`;
+      <span class="tag">${esc(LADDER_LABEL[ms.ladder]||ms.ladder)}</span></div>`;
   }
   h+=`</div>`;
 
@@ -1797,7 +1925,7 @@ function renderLog(){
     h+=`</table></div></div>`;
   }
   const all=S.diffs.slice().reverse();
-  h+=`<div class="card"><h3>Every decision</h3><p class="mini">The planner cannot change anything without writing a sentence here. A change with no rule id throws.</p>`;
+  h+=`<div class="card"><h3>Every decision it has made</h3><p class="mini">Nothing can change without a sentence here — a change with no reason attached throws an error rather than shipping silently.</p>`;
   if(!all.length) h+=`<p class="sub">Nothing yet — this fills up after your first couple of sessions.</p>`;
   for(const g of all.slice(0,40)) for(const d of g.list)
     h+=`<p class="why"><b>${esc(g.date)} · ${esc(d.rule)}</b> ${esc(d.sentence)}</p>`;
@@ -1911,8 +2039,8 @@ function renderSetup(){
     <label class="fld"><span>Minutes per session</span><input type="number" id="mins" value="${st.minutes}"></label>
     <button class="btn wide" data-act="savesched">Save</button></div>`;
 
-  h+=`<div class="card"><h3>Gym — ${esc(g.name)}</h3>
-    <p class="mini">This is what stops the app prescribing a weight your rack cannot make.</p>
+  h+=`<div class="card"><details><summary><b>Gym — ${esc(g.name)}</b></summary>
+    <p class="mini" style="margin-top:8px">This is what stops the app prescribing a weight your rack cannot make.</p>
     <div class="grid2">
       <label class="fld"><span>Units</span><select id="unit">${["lb","kg"].map(x=>`<option ${g.unit===x?"selected":""}>${x}</option>`).join("")}</select></label>
       <label class="fld"><span>Bar weight (${esc(g.unit)})</span><input type="number" id="bar" step="0.5" value="${r1(fromKg(g.barKg,g.unit))}"></label>
@@ -1922,7 +2050,7 @@ function renderSetup(){
       <label class="fld"><span>Cable / stack step</span><input type="number" id="stack" value="${g.stackStep}"></label>
     </div>
     <label class="fld"><span>Smallest plate pair (${esc(g.unit)})</span><input type="number" id="minplate" step="0.5" value="${Math.min(...g.plates.map(p=>p.w))}"></label>
-    <button class="btn wide" data-act="savegym">Save gym</button></div>`;
+    <button class="btn wide" data-act="savegym">Save gym</button></details></div>`;
 
   h+=`<div class="card"><h3>Safety</h3>
     <button class="btn wide" data-act="spotter">${spotterOn?"Spotter / pins set — active for 4 h":"I have a spotter or pins right now"}</button>
@@ -1946,14 +2074,15 @@ function renderSetup(){
 
   /* The honesty block. Final copy, shown where the weights are, because a
      number this soft should never appear without its own error bars. */
-  h+=`<div class="card"><h3>What these numbers are, and what they aren't</h3>
+  h+=`<div class="card"><details><summary><b>What these numbers are, and what they aren't</b></summary><div style="margin-top:8px">
     <p class="sub">The weights come from a small research literature on what strangers rate as attractive in photographs, CGI models and line drawings of men's bodies. That isn't the same as what happens between two people. When researchers measured actual outcomes instead of ratings — whether men with more muscle end up with more partners — the association is about <b>r = 0.08 to 0.13</b>: somewhere between half a percent and two percent of the variation. It's real. It's small. And it's correlational — nobody has ever measured the same man before and after a training block and rated him twice. That study does not exist.</p>
     <p class="sub"><b>The per-muscle weights are the weakest part of this app.</b> Exactly one study has ever asked women about individual muscle groups. Thirteen of its fourteen muscles fall inside a one-point band on a seven-point scale, while individual raters disagreed with each other by more than that entire band. Traps is the only group that clearly separates. So this ships four tiers instead of sixteen numbers. Where you see 2.0 next to 1.25, that gap is a judgment about recovery cost and joint health — not a measured preference.</p>
     <p class="sub"><b>Body fat is an estimate, not a measurement.</b> Whatever your scale or calipers say, the real number is probably within three to five points of it. So nothing in the plan triggers off a body-fat percentage. Everything triggers off waist and scale weight, measured the same way each time.</p>
     <p class="sub"><b>The body is one input.</b> Nobody has measured what share of attractiveness it carries — this research removes faces by design. Height, face and voice all show up in it and none are things a training plan touches. This app optimises one slice of one channel, and the slice is smaller than the confidence with which it usually gets discussed.</p>
-    <p class="sub"><b>What stays on regardless:</b> no daily weight or waist on the home screen, a hard stop after 12 straight weeks in a deficit, a rate cap of 0.8% of bodyweight a week, no physique imagery, no streaks on eating, and a 12-week review cadence. Those are enforced in the planner, not suggested in the copy.</p></div>`;
+    <p class="sub"><b>What stays on regardless:</b> no daily weight or waist on the home screen, a hard stop after 12 straight weeks in a deficit, a rate cap of 0.8% of bodyweight a week, no physique imagery, no streaks on eating, and a 12-week review cadence. Those are enforced in the planner, not suggested in the copy.</p></div></details></div>`;
 
-  h+=`<div class="card"><h3>Provenance</h3><p class="mini">Numbers this app treats as engineering guesses rather than findings, surfaced deliberately:</p>
+  h+=`<div class="card"><details><summary><b>Where the numbers came from</b></summary>
+    <p class="mini" style="margin-top:8px">Values this app treats as engineering guesses rather than findings, surfaced deliberately:</p>
     <p class="why"><b>SEL-01</b> 9 sets per muscle per session. Not in the peer-reviewed literature — the figure it's derived from exists only as a preprint whose authors say the region is unresolved.</p>
     <p class="why"><b>MIS-01</b> 14/28-day layoff bands. No trial has tested a complete 14-day layoff in trained lifters.</p>
     <p class="why"><b>PRG-08</b> 2–10% load steps. ACSM committee consensus, not a trial.</p>
@@ -1961,7 +2090,7 @@ function renderSetup(){
     <p class="why"><b>Visual weights</b> Four tiers, mostly judgment. The one per-muscle study asks an <i>ideal-point</i> question ("how muscled do you find X most attractive?"), which is a preferred level, not an importance ranking — reading it as a ranking is a category error, and it is why this vector is deliberately flat.</p>
     <p class="why"><b>No muscularity ceiling</b> Curvature is real but nobody has located the peak: the best-powered test fits a vertex outside its own stimulus range, and the one study that tested a quadratic strength term found none significant. So diminishing returns live on the volume curve, never as a stop.</p>
     <p class="why"><b>PHA-08</b> The 2.5 cm waist tripwire is calibrated to tape noise, not to any preference study.</p>
-    <p class="why"><b>Deleted as unverifiable</b> A 13-14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, and "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p></div>`;
+    <p class="why"><b>Deleted as unverifiable</b> A 13-14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, and "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p></details></div>`;
   $("#v-setup").innerHTML=h;
 }
 
@@ -2024,14 +2153,79 @@ async function handle(a,t,ev){
   const st=S.settings;
   switch(a){
   /* ---- session ---- */
-  case "start": {
-    const d=todayISO(), plan=ensurePlan(d);
-    const slim = Object.assign({}, plan, {
-      slots: (plan.slots||[]).map(sl=>{ const c=Object.assign({}, sl); delete c.loadSet; return c; })
-    });
-    await append("planStart",{d, plan:slim});
-    S.plans[d] = Object.assign({}, plan, {status:"started"});
-    return go("train");
+  case "swap": {
+    const exId=t.dataset.ex, m=t.dataset.m;
+    const plan=ensurePlan(todayISO());
+    const alts=alternativesFor(exId, m, plan.slots.map(x=>x.ex));
+    if(!alts.length) return toast("Nothing else here hits that muscle.");
+    sheet(`<h3>Swap ${esc((LIBX[exId]||{}).name||"")}</h3>
+      <p class="sub">Same muscle, available at your gym, not already in today's session.</p>
+      <div class="stack" style="margin-top:12px">
+        ${alts.map(e=>`<button class="btn wide" data-act="swapto" data-from="${exId}" data-to="${e.id}">${esc(e.name)}</button>`).join("")}
+      </div>
+      <p class="mini" style="margin-top:12px">Your progress on the original is kept — swapping doesn't reset anything.</p>`);
+    return;
+  }
+  case "swapto": {
+    await ensureStarted();
+    await append("planEdit",{d:todayISO(), op:"swap", from:t.dataset.from, to:t.dataset.to, reason:"equipment"});
+    closeSheet(); rebuild(); return render();
+  }
+  case "addset": {
+    await ensureStarted();
+    await append("planEdit",{d:todayISO(), op:"sets", ex:t.dataset.ex, sets:+t.dataset.n});
+    rebuild(); return render();
+  }
+  case "timecut": {
+    sheet(`<h3>How long have you got?</h3>
+      <p class="sub">Index lifts and the heavy compound for each priority muscle are protected — what gets cut is accessory work, from the back.</p>
+      <div class="chips" style="margin-top:12px">
+        ${[30,45,60,90].map(v=>`<button class="chip" data-act="timeset" data-v="${v}" style="flex:1">${v} min</button>`).join("")}</div>`);
+    return;
+  }
+  case "timeset": {
+    const mins=+t.dataset.v, d=todayISO();
+    const before=ensurePlan(d).minutes;
+    if(before<=mins){ closeSheet();
+      return toast(`Today is already about ${before} minutes — nothing to cut.`, "ok"); }
+    await ensureStarted();
+    await append("planEdit",{d, op:"time", minutes:mins});
+    closeSheet(); rebuild();
+    const after=ensurePlan(d);
+    // The response to a deliberate tap has to be visible, not filed away in a
+    // disclosure the user has to go looking for.
+    const note=(after.notes||[]).filter(n=>n.rule==="CAP-01").slice(-1)[0];
+    render();
+    if(note) toast(note.text, after.minutes>mins ? "warn" : "ok");
+    return;
+  }
+  case "trainanyway": {
+    await append("settings",{days:[...new Set(S.settings.days.concat(dow(todayISO())))].sort()});
+    rebuild(); return render();
+  }
+  case "editset": {
+    const id=+t.dataset.id;
+    const ev=S.events.find(x=>x.id===id); if(!ev) return;
+    const e=LIBX[ev.payload.ex];
+    sheet(`<h3>${esc(e?e.name:"Set")}</h3>
+      <p class="sub">${esc(fmtL(e,ev.payload.load))} × ${ev.payload.reps}${ev.payload.warmup?" (warm-up)":""}</p>
+      <label class="fld" style="margin-top:12px"><span>Reps actually done</span>
+        <input type="number" id="ereps" value="${ev.payload.reps}"></label>
+      <button class="btn primary wide" data-act="saveset" data-id="${id}">Save</button>
+      <button class="btn wide danger" data-act="voidset" data-id="${id}" style="margin-top:8px">Remove this set</button>
+      <p class="mini" style="margin-top:10px">Nothing is erased — a correction is recorded on top, so the history stays honest.</p>`);
+    return;
+  }
+  case "saveset": {
+    const id=+t.dataset.id, ev=S.events.find(x=>x.id===id); if(!ev) return;
+    const reps=+$("#ereps").value;
+    await append("voidSet",{id});
+    await append("set", Object.assign({}, ev.payload, {reps, corrected:true}));
+    closeSheet(); rebuild(); return render();
+  }
+  case "voidset": {
+    await append("voidSet",{id:+t.dataset.id});
+    closeSheet(); rebuild(); return render();
   }
   case "rep+": case "rep-": {
     const id=t.dataset.ex, span=document.querySelector(`[data-reps="${CSS.escape(id)}"]`);
@@ -2061,6 +2255,7 @@ async function handle(a,t,ev){
   case "warmup": {
     const id=t.dataset.ex, sel=document.querySelector(`[data-load="${CSS.escape(id)}"]`);
     if(!sel || sel.value==="") return toast("Pick the weight first.");
+    await ensureStarted();
     // §5.7: never render an input control that cannot represent what actually
     // happened. Warm-ups are excluded from every ledger and from progression,
     // but refusing to record them would just push them into the working sets.
@@ -2072,7 +2267,7 @@ async function handle(a,t,ev){
   }
   case "rpe": {
     await append("sessionEnd",{d:todayISO(), rpe:t.dataset.v===""?null:+t.dataset.v});
-    closeSheet(); Rest.clear(); Sync.flush(); rebuild(); return go("today");
+    closeSheet(); Rest.clear(); Sync.flush(); rebuild(); return go("session");
   }
   case "endp": { const cb=END_CB; END_CB=null; closeSheet(); return cb(t.dataset.v); }
   case "endsession": {
@@ -2171,7 +2366,17 @@ async function handle(a,t,ev){
   }
 }
 
+async function ensureStarted(){
+  const d=todayISO(), stored=S.plans[d];
+  if(stored && stored.status==="started") return;
+  const plan=ensurePlan(d);
+  const slim=Object.assign({}, plan, {
+    slots:(plan.slots||[]).map(sl=>{ const c=Object.assign({}, sl); delete c.loadSet; return c; })});
+  await append("planStart",{d, plan:slim});
+  S.plans[d]=Object.assign({}, plan, {status:"started"});
+}
 async function commitSet(exId, load, reps, rir, endpoint, extraReps){
+  await ensureStarted();
   const e=LIBX[exId], date=todayISO(), plan=S.plans[date];
   const slot=plan.slots.find(s=>s.ex===exId);
   // inputs to the fatigue-aware expectation, measured not assumed
