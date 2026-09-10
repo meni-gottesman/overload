@@ -337,5 +337,44 @@ ok("the void list is rebuilt from the log", ctx.VOID_N===1, ctx.VOID_N);
 ok("the corrected set is gone from the session", ctx.SESS_SETS===1, ctx.SESS_SETS);
 ok("the bad number never reaches the ledger", ctx.HAS_99===false);
 
+console.log("\nNotes — free text that moves the planner, deterministically");
+run(`
+  N1 = scanNote("tweaked my left shoulder benching today");
+  N2 = scanNote("felt great, shoulder press went up");
+  N3 = scanNote("numbness down my arm and chest pain on the last set");
+  N4 = scanNote("my knee is sore and my lower back is stiff");
+  N5 = scanNote("");
+`);
+ok("a hurt joint is detected", ctx.N1.joints.includes("shoulder"), JSON.stringify(ctx.N1.joints));
+ok("a joint named WITHOUT pain is not flagged", ctx.N2.joints.length===0, JSON.stringify(ctx.N2.joints));
+ok("red-flag language is caught", ctx.N3.red.length>0, JSON.stringify(ctx.N3.red));
+ok("multiple joints are found", ctx.N4.joints.length===2, JSON.stringify(ctx.N4.joints));
+ok("empty text is inert", ctx.N5.joints.length===0 && ctx.N5.red.length===0);
+
+console.log("\nSAF-05 — a flagged joint changes what gets PRESCRIBED, not just effort");
+run(`
+  S.settings=defaultSettings(); S.settings.startDate="2026-04-01"; S.settings.rampUntil="2026-04-02";
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  S.ex={}; S.sessions=[]; S.events=[]; S.planEdits={};
+  CLEAN = buildPlan("2026-04-20");
+  CLEAN_EX = (CLEAN.slots||[]).map(s=>s.ex);
+  CLEAN_SHOULDER = CLEAN_EX.filter(id=>(LIBX[id].joints.shoulder||0)>=1).length;
+
+  for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  S.irr.shoulder={sev:8,at:"2026-04-20",quality:"dull"};
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  S.ex={};
+  HURT = buildPlan("2026-04-20");
+  HURT_EX = (HURT.slots||[]).map(s=>s.ex);
+  HURT_SHOULDER = HURT_EX.filter(id=>(LIBX[id].joints.shoulder||0)>=1).length;
+  HURT_NOTE = (HURT.notes||[]).filter(n=>n.rule==="SAF-05").length;
+  HURT_COUNT = HURT_EX.length;
+`);
+ok("a clean plan does load the shoulder", ctx.CLEAN_SHOULDER>0, ctx.CLEAN_SHOULDER+" shoulder-loading lifts");
+ok("a flagged shoulder removes them", ctx.HURT_SHOULDER===0, ctx.HURT_SHOULDER+" left");
+ok("but the session still happens", ctx.HURT_COUNT>0, ctx.HURT_COUNT+" exercises");
+ok("and it says why", ctx.HURT_NOTE>0);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail?1:0);

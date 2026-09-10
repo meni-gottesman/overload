@@ -73,7 +73,7 @@ nav{
   position:fixed;left:0;right:0;bottom:0;z-index:50;
   background:var(--surface);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom);
-  display:grid;grid-template-columns:repeat(4,1fr);
+  display:grid;grid-template-columns:repeat(3,1fr);
 }
 nav button{
   appearance:none;border:0;background:none;color:var(--ink3);
@@ -182,15 +182,13 @@ td.n{font-family:var(--mono);text-align:right}
 
   <section class="view" id="v-session" aria-label="Today's session"></section>
   <section class="view" id="v-log"   aria-label="Progress"></section>
-  <section class="view" id="v-body"  aria-label="Body"></section>
-  <section class="view" id="v-setup" aria-label="Setup"></section>
+  <section class="view" id="v-setup" aria-label="Settings"></section>
 </main>
 
 <nav id="tabs" class="hide">
   <button data-v="session" aria-current="true"><span class="g">◆</span>Today</button>
   <button data-v="log"><span class="g">▤</span>Progress</button>
-  <button data-v="body"><span class="g">◑</span>Body</button>
-  <button data-v="setup"><span class="g">⚙</span>Setup</button>
+  <button data-v="setup"><span class="g">⚙</span>Settings</button>
 </nav>
 
 <div id="sheet" class="hide"></div>
@@ -656,7 +654,7 @@ function dow(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(y,m
 
 /* ============================ STATE ================================ */
 const S = { events:[], settings:null, ex:{}, mus:{}, irr:{}, sessions:[], bw:[], photos:[],
-            waist:[], diffs:[], plans:{}, planEdits:{}, voided:new Set(),
+            waist:[], notes:[], diffs:[], plans:{}, planEdits:{}, voided:new Set(),
             redflag:false, calibLast:null, restricted:false,
             phaseSince:null };
 
@@ -713,7 +711,7 @@ function emit(list, field, oldV, newV, triggerVar, triggerVal, ruleId, sentence)
 
 function rebuild(){
   S.settings = defaultSettings(); S.ex={}; S.mus={}; S.irr={}; S.sessions=[]; S.bw=[];
-  S.photos=[]; S.waist=[]; S.diffs=[]; S.plans={}; S.planEdits={}; S.redflag=false; S.calibLast=null; S.phaseSince=null;
+  S.photos=[]; S.waist=[]; S.notes=[]; S.diffs=[]; S.plans={}; S.planEdits={}; S.redflag=false; S.calibLast=null; S.phaseSince=null;
   for(const m of MUSCLES) S.mus[m]=newMuscleState();
   for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
 
@@ -730,6 +728,7 @@ function rebuild(){
       Object.assign(S.settings, p);
     }
     else if(ev.type==="waist") S.waist.push({d:p.d, cm:p.cm, site:p.site});
+    else if(ev.type==="note") S.notes.push({d:p.d, text:p.text, ts:ev.ts});
     else if(ev.type==="redflag") S.redflag = !!p.active;
     else if(ev.type==="weight") S.bw.push({d:p.d,kg:p.kg});
     else if(ev.type==="photo") S.photos.push(p);
@@ -994,7 +993,7 @@ function weeklyRollover(week){
     const roll3 = (ms.zHist=ms.zHist||[], ms.z!=null&&ms.zHist.push(ms.z), ms.zHist.length>3&&ms.zHist.shift(),
                    ms.zHist.reduce((x,y)=>x+y,0));
     const deloadTrig = S.settings.phase==="CUT" ? K.ROLL3_DELOAD*K.CUT_DELOAD_MULT : K.ROLL3_DELOAD;
-    const irrMax = Math.max(0, ...Object.values(S.irr).map(r=>r.sev));
+    const irrMax = Math.max(0, ...Object.values(S.irr).map(r=>(r&&r.sev)||0));
 
     if(ms.deloadLeft>0){ ms.deloadLeft -= 7; if(ms.deloadLeft<=0){ ms.ladder="HOLD";
         emit(diffs,"ladder","DELOAD","HOLD","deloadDone",true,"VOL-10",`${MUSCLE_LABEL[m]} deload finished — back to normal sets.`);} }
@@ -1080,10 +1079,11 @@ function weightsLegal(w){
 }
 function prevWeekOf(w){ const [y,n]=w.split("-W").map(Number);
   return n>1 ? y+"-W"+String(n-1).padStart(2,"0") : (y-1)+"-W52"; }
-function countIrritated(th){ return JOINTS.filter(j=>S.irr[j].sev>=th).length; }
+function countIrritated(th){ return JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>=th).length; }
 function sd(a){ if(a.length<2) return 0; const m=a.reduce((x,y)=>x+y,0)/a.length;
   return Math.sqrt(a.reduce((s,v)=>s+(v-m)*(v-m),0)/(a.length-1)); }
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const listOf=a=>a.length<2?(a[0]||""):a.slice(0,-1).join(", ")+" and "+a[a.length-1];
 const r1=v=>Math.round(v*10)/10;
 const pct1=v=>Math.round(v*1000)/10+"%";
 
@@ -1246,7 +1246,7 @@ function computeRestricted(){
   for(const s of S.sessions) byWeek[s.week]=(byWeek[s.week]||0)+1;
   const weeks=Object.keys(byWeek).sort().slice(-K.RESTRICTED_WEEKS);
   const heavy = weeks.length>=K.RESTRICTED_WEEKS && weeks.every(w=>byWeek[w]>=K.RESTRICTED_SESSIONS);
-  const hurt = JOINTS.some(j=>S.irr[j].sev>=6) && S.sessions.length &&
+  const hurt = JOINTS.some(j=>(S.irr[j]||{sev:0}).sev>=6) && S.sessions.length &&
                daysBetween(S.sessions[S.sessions.length-1].date, todayISO())<=1;
   S.restricted = !!(heavy||hurt);
 }
@@ -1333,8 +1333,16 @@ function buildPlan(date){
     if(NO_DIRECT.has(m)) continue;                                  // SEL-04
     if(hrs>=K.SPACING_H && ms.doneWeek<needed[m] && deficit[m]>0) eligible.push(m);
   }
+  /* A flagged joint can leave a muscle with no legal exercise. Scheduling it
+     anyway produces an empty session; the right move is to spend the day on
+     muscles that CAN still be trained. */
+  const blockNow = Math.floor(daysBetween(st.startDate||date, date)/(7*K.ROTATION_BLOCK_WEEKS));
+  const trainable = eligible.filter(m=>candidatesFor(m, blockNow).length>0);
+  const shut = eligible.filter(m=>!trainable.includes(m));
+  if(shut.length) notes.push({rule:"SAF-05",
+    text:`Nothing here trains ${listOf(shut.map(m=>MUSCLE_LABEL[m].toLowerCase()))} without loading a joint you've flagged, so today goes elsewhere. ${shut.length>1?"They come":"It comes"} back as the flag fades.`});
   let bumpRir=0, setScale=1;
-  let pool = eligible;
+  let pool = trainable;
   if(!pool.length && isTrainingDay){
     pool=[MUSCLES.slice().sort((a,b)=>deficit[b]-deficit[a])[0]];
     bumpRir=2; setScale=0.75;
@@ -1364,6 +1372,9 @@ function buildPlan(date){
 
   /* --- Phase 4: exercise selection (SEL-04..06) ----------------- */
   const block = Math.floor(daysBetween(st.startDate,date)/(7*K.ROTATION_BLOCK_WEEKS));
+  const flagged = JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>=6);
+  if(flagged.length) notes.push({rule:"SAF-05",
+    text:`${listOf(flagged.map(j=>j.replace("_"," ")))} flagged, so anything that loads ${flagged.length>1?"them":"it"} hard is off today's list. The muscles still get trained — through a different door.`});
   const usedPatterns=new Set(), slots=[]; let minutes=0;
   const budget = st.minutes;
   for(const m of pool){
@@ -1372,7 +1383,7 @@ function buildPlan(date){
     if(slots.length >= K.MAX_SLOTS) break;
     const cands = candidatesFor(m, block).filter(e=>!usedPatterns.has(e.pattern));
     const chosen=[];
-    if(idx && LIBX[idx] && available(LIBX[idx]) && !usedPatterns.has(LIBX[idx].pattern)) chosen.push(LIBX[idx]);
+    if(idx && LIBX[idx] && available(LIBX[idx]) && jointOK(LIBX[idx]) && !usedPatterns.has(LIBX[idx].pattern)) chosen.push(LIBX[idx]);
     const wantEx = ms.tier==="PRIORITY" ? 2 : 1;   // specialisation is funded by taking from elsewhere
     for(const e of cands){ if(chosen.length>=wantEx) break; if(chosen.some(c=>c.id===e.id)) continue; chosen.push(e); }
     if(!chosen.length) continue;
@@ -1424,11 +1435,26 @@ function available(e){
   const eq=S.settings.gym.equipment;
   return e.equip.every(x=>eq.includes(x));
 }
+/* A joint you have told the app about has to change what it PRESCRIBES, not
+   merely how close to failure it takes you. Anything above a 5 pulls exercises
+   that load that joint out of selection entirely; the muscle still gets
+   trained, through a different door. */
+function jointOK(e){
+  return !Object.keys(e.joints||{}).some(j=>{
+    const r=S.irr[j]; if(!r) return false;
+    const load=e.joints[j]||0;
+    // 6-7: drop the lifts that load it hard. 8+: drop anything that loads it
+    // at all. A joint listed at 0 is listed because it is INVOLVED but not
+    // loaded — excluding those removed almost the whole library.
+    return (r.sev>=8 && load>=1) || (r.sev>=6 && load>=2);
+  });
+}
 function candidatesFor(m, block){
   // Prime movers only if any exist for this muscle; a 0.5 synergist is a
   // fallback, never the reason a slot is labelled with that muscle.
-  const prime = LIB.filter(e=>available(e) && (e.contributions[m]||0)>=1.0);
-  const list = prime.length ? prime : LIB.filter(e=>available(e) && (e.contributions[m]||0)>=0.5);
+  const ok = e => available(e) && jointOK(e);
+  const prime = LIB.filter(e=>ok(e) && (e.contributions[m]||0)>=1.0);
+  const list = prime.length ? prime : LIB.filter(e=>ok(e) && (e.contributions[m]||0)>=0.5);
   // rotating shell: deterministic 8-week rotation, so it stays auditable
   const rot=[...list].sort((a,b)=>a.id<b.id?-1:1);
   const off = block % Math.max(1,rot.length);
@@ -1634,6 +1660,34 @@ The training log is NOT encrypted, on purpose. log/**.ndjson is one JSON
 object per line and needs no key, no tool, and no running app.
 `;
 
+/* ================== NOTES THAT DO SOMETHING =======================
+   A free-text box that only stores text is a diary. This one is scanned for
+   the two things that should change a plan — a joint you have hurt, and a
+   symptom that means stop training and see someone — and then ASKS. It never
+   acts on parsed text silently: matching is a suggestion, confirmation is the
+   user's. Deterministic keywords, no model, so there is nothing to inject.
+   ================================================================== */
+const JOINT_WORDS = {
+  shoulder:["shoulder","delt","rotator","cuff","labrum","ac joint"],
+  lumbopelvic:["back","lumbar","spine","disc","si joint","erector"],
+  knee:["knee","patella","meniscus","acl","quad tendon"],
+  elbow:["elbow","tricep tendon","golfer","tennis elbow"],
+  wrist_hand:["wrist","hand","forearm tendon","thumb","grip pain"],
+  hip:["hip","glute med","groin","adductor","hip flexor"],
+};
+const HURT_WORDS = ["hurt","injur","pain","tweak","strain","sore","pulled","ache",
+  "sprain","impinge","tendon","inflam","stiff","clicking","popped","sharp"];
+const RED_WORDS = ["chest pain","numb","tingl","faint","dizzy","black out","cola",
+  "can't straighten","cannot straighten","night pain","fever","swollen calf","radiating"];
+
+function scanNote(text){
+  const t=(text||"").toLowerCase();
+  const red = RED_WORDS.filter(w=>t.includes(w));
+  const hurt = HURT_WORDS.some(w=>t.includes(w));
+  const joints = Object.keys(JOINT_WORDS).filter(j=>JOINT_WORDS[j].some(w=>t.includes(w)));
+  return { red, joints: hurt ? joints : [], hurt };
+}
+
 /* ================= SESSION HELPERS (the useful bits) ==============
    What a lifter actually needs mid-set: what they did last time, a way out
    when the machine is taken, and a way to fix a mistyped number. The first
@@ -1739,7 +1793,7 @@ function render(){
   $("#topdate").textContent = new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
   $("#v-"+VIEW).classList.add("on");
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current", b.dataset.v===VIEW?"true":"false"));
-  ({session:renderSession, log:renderLog, body:renderBody, setup:renderSetup})[VIEW]();
+  ({session:renderSession, log:renderLog, setup:renderSetup})[VIEW]();
 }
 function go(v){ VIEW=v; render(); window.scrollTo(0,0); }
 
@@ -1886,11 +1940,16 @@ function coachCard(p){
   const recent = S.diffs.slice(-4).reverse().flatMap(g=>g.list);
   const notes = (p.notes||[]);
   if(!adv.length && !recent.length && !notes.length) return "";
+  // Anything that visibly reshaped today is stated plainly; the rest folds away.
+  const LOUD = new Set(["SAF-05","CAP-01","MIS-01","OVERCONSTRAINED","PRG-10","SAF-SCREEN"]);
+  const loud = notes.filter(n=>LOUD.has(n.rule));
+  const quiet = notes.filter(n=>!LOUD.has(n.rule));
   let h=`<div class="card"><h3>Why it looks like this</h3>`;
+  for(const n of loud) h+=`<p class="why">${esc(n.text)}</p>`;
   for(const a of adv) h+=`<p class="why">${esc(a.text)}</p>`;
-  if(recent.length||notes.length){
-    h+=`<details style="margin-top:6px"><summary class="mini" style="cursor:pointer">Every change, with its rule</summary>`;
-    for(const n of notes) h+=`<p class="why"><b>${esc(n.rule)}</b> ${esc(n.text)}</p>`;
+  if(recent.length||quiet.length){
+    h+=`<details style="margin-top:6px"><summary class="mini">Every change, with its rule</summary>`;
+    for(const n of quiet) h+=`<p class="why"><b>${esc(n.rule)}</b> ${esc(n.text)}</p>`;
     for(const d of recent) h+=`<p class="why"><b>${esc(d.rule)}</b> ${esc(d.sentence)}</p>`;
     h+=`</details>`;
   }
@@ -1898,15 +1957,33 @@ function coachCard(p){
 }
 
 
-/* --------------------------- PROGRESS ----------------------------- */
-const LADDER_LABEL = { RAMP:"easing in", BUILD:"adding", HOLD:"steady",
-  PROBE:"testing fewer", DELOAD:"recovering", MAINTAIN:"holding" };
+/* --------------------------- PROGRESS -----------------------------
+   Everything that answers "is this working?", in one place. Strength first,
+   because it is the only signal that moves fast enough to read weekly.
+   Body numbers are further down on purpose and never on the home screen.
+   ------------------------------------------------------------------ */
 function renderLog(){
   let h="";
   const exIds=[...new Set(S.events.filter(e=>e.type==="set" && !S.voided.has(e.id)).map(e=>e.payload.ex))];
-  h+=`<div class="card"><h3>This week</h3><p class="mini">Sets done against sets planned. A set on a machine that hits two muscles counts as a whole one for the main muscle and half for the other.</p>`;
+
+  if(exIds.length){
+    h+=`<div class="card"><h3>Working weights</h3>
+      <p class="mini">What the planner will put in front of you next, per lift.</p>
+      <div class="scroll-x"><table>
+      <tr><th>Lift</th><th style="text-align:right">Load</th><th style="text-align:right">Reps</th><th style="text-align:right">Sessions</th></tr>`;
+    for(const id of exIds){ const e=LIBX[id], es=S.ex[id]; if(!e||!es) continue;
+      h+=`<tr><td>${esc(e.name)}</td><td class="n">${esc(fmtL(e,es.load))}</td>
+      <td class="n">${es.target}</td><td class="n">${es.sessions}</td></tr>`; }
+    h+=`</table></div></div>`;
+  } else {
+    h+=`<div class="empty">Log a session and this fills up.</div>`;
+  }
+
+  h+=`<div class="card"><h3>This week</h3>
+    <p class="mini">Sets done against sets planned. A machine that hits two muscles counts as a whole set for the main one and half for the other.</p>`;
   for(const m of MUSCLES){ const ms=S.mus[m];
-    if(ms.fsWeek===0 && ms.target===K.FS_START) continue;
+    if(NO_DIRECT.has(m) && !ms.fsWeek) continue;
+    if(!ms.fsWeek && !ms.target) continue;
     const w=Math.min(100, 100*ms.fsWeek/Math.max(1,ms.target));
     h+=`<div class="setline"><span class="grow">${MUSCLE_LABEL[m]}
       <div style="height:6px;background:var(--sunken);border-radius:3px;margin-top:4px">
@@ -1916,84 +1993,66 @@ function renderLog(){
   }
   h+=`</div>`;
 
-  if(exIds.length){
-    h+=`<div class="card"><h3>Working weights</h3><div class="scroll-x"><table>
-      <tr><th>Exercise</th><th style="text-align:right">Load</th><th style="text-align:right">Reps</th><th style="text-align:right">Done</th></tr>`;
-    for(const id of exIds){ const e=LIBX[id], es=S.ex[id]; if(!e||!es) continue;
-      h+=`<tr><td>${esc(e.name)}</td><td class="n">${esc(fmtL(e,es.load))}</td>
-      <td class="n">${es.target}</td><td class="n">${es.sessions}</td></tr>`; }
-    h+=`</table></div></div>`;
-  }
-  const all=S.diffs.slice().reverse();
-  h+=`<div class="card"><h3>Every decision it has made</h3><p class="mini">Nothing can change without a sentence here — a change with no reason attached throws an error rather than shipping silently.</p>`;
-  if(!all.length) h+=`<p class="sub">Nothing yet — this fills up after your first couple of sessions.</p>`;
-  for(const g of all.slice(0,40)) for(const d of g.list)
-    h+=`<p class="why"><b>${esc(g.date)} · ${esc(d.rule)}</b> ${esc(d.sentence)}</p>`;
-  h+=`</div>`;
-  $("#v-log").innerHTML=h;
-}
-
-/* ----------------------------- BODY ------------------------------- */
-function renderBody(){
-  if(S.restricted){ $("#v-body").innerHTML=`<div class="card"><h3>Hidden for now</h3>
-    <p class="sub">Body numbers are hidden while the frequency cap is on. They'll come back.</p></div>`; return; }
-  const t=bwTrend();
-  let h=`<div class="card"><h3>Morning weight</h3>
-    <div class="row"><input type="number" step="0.1" inputmode="decimal" id="bwin" placeholder="${u()}">
-    <button class="btn primary" data-act="logbw">Log</button></div>`;
-  if(t){
-    h+=`<div class="row" style="margin-top:12px"><div class="grow">
-      <div class="bigload">${esc(fmtLoad(t.ew))}<small>trend</small></div>
-      <div class="mini">last reading ${esc(fmtLoad(t.last))} · ${t.n} logged</div></div></div>`;
-    if(t.pctWk!=null) h+=`<p class="why"><b>${(t.pctWk*100>=0?"+":"")}${(t.pctWk*100).toFixed(2)}% a week</b> ${
-      S.settings.phase==="CUT"
-        ? (t.pctWk<K.CUT_BAND[0]?"Faster than the −0.5 to −1.0% band — that's where lean mass starts going with it."
-          : t.pctWk>K.CUT_BAND[1]?"Slower than the −0.5 to −1.0% band."
-          : "Inside the −0.5 to −1.0% band.")
-        : "Trend over the last 21 days."}</p>`;
-    if(!t.enough) h+=`<p class="why"><b>${t.readings14}/8 readings</b> in the last 14 days. Below 8 I won't change anything off bodyweight — acting on 3 noisy readings is worse than not acting.</p>`;
-  }
-  h+=`</div>`;
-
-  /* Waist is the one circumference that earns its place: it is the numerator
-     of every shape term worth tracking, and unlike shoulder breadth it MOVES —
-     biacromial width is skeletal, deltoid hypertrophy buys 1-2 cm over years,
-     waist moves 10+ cm with body fat. SEL-07: mean of three, one site, forever. */
-  const w=waistStats();
-  h+=`<div class="card"><h3>Waist</h3>
-    <p class="mini">Mean of three measures, same site every time, same time of day. Mixing sites changes the number by centimetres and tells you nothing.</p>
-    <div class="row"><input type="number" step="0.1" inputmode="decimal" id="w1" placeholder="1">
-      <input type="number" step="0.1" inputmode="decimal" id="w2" placeholder="2">
-      <input type="number" step="0.1" inputmode="decimal" id="w3" placeholder="3">
-      <button class="btn primary" data-act="logwaist">Log</button></div>`;
-  if(w && w.median28!=null){
-    h+=`<div class="row" style="margin-top:12px"><div class="grow">
-      <div class="bigload">${r1(w.median28)}<small>cm · 4-week median</small></div>
-      <div class="mini">${w.n} measurement${w.n===1?"":"s"} logged</div></div></div>`;
-    if(w.min90!=null){
-      const d = w.median28 - w.min90;
-      // UI-02: never render a delta below the measurement's own resolution.
-      h+= Math.abs(d) < K.WAIST_MDC_CM
-        ? `<p class="why"><b>No real change</b> Within ${K.WAIST_MDC_CM} cm of your 90-day low, which is the smallest difference a tape can actually resolve. Treating anything smaller as a trend is reading noise.</p>`
-        : `<p class="why"><b>${d>0?"+":""}${r1(d)} cm</b> versus your 90-day low.</p>`;
+  if(S.restricted){
+    h+=`<div class="card"><h3>Body numbers hidden</h3>
+      <p class="sub">They'll come back when the frequency cap lifts.</p></div>`;
+  } else {
+    const t=bwTrend();
+    h+=`<div class="card"><h3>Morning weight</h3>
+      <div class="row"><input type="number" step="0.1" inputmode="decimal" id="bwin" placeholder="${u()}">
+      <button class="btn primary" data-act="logbw">Log</button></div>`;
+    if(t){
+      h+=`<div class="row" style="margin-top:12px"><div class="grow">
+        <div class="bigload">${esc(fmtLoad(t.ew))}<small>trend</small></div>
+        <div class="mini">last reading ${esc(fmtLoad(t.last))} · ${t.n} logged</div></div></div>`;
+      if(t.pctWk!=null) h+=`<p class="why"><b>${(t.pctWk*100>=0?"+":"")}${(t.pctWk*100).toFixed(2)}% a week.</b> ${
+        S.settings.phase==="CUT"
+          ? (t.pctWk<K.CUT_RATE[0]?"Faster than 0.5–0.8% a week, which is where lean mass starts going with it."
+            : t.pctWk>K.CUT_RATE[1]?"Slower than the 0.5–0.8% band."
+            : "Inside the 0.5–0.8% band.")
+          : "Over the last 21 days."}</p>`;
+      if(!t.enough) h+=`<p class="why"><b>${t.readings14} of 8 readings</b> in the last fortnight. Below eight I won't change anything off bodyweight — acting on three noisy readings is worse than not acting.</p>`;
     }
-  }
-  h+=`</div>`;
+    h+=`</div>`;
 
-  h+=`<div class="card"><h3>Photos</h3>
-    <p class="mini">Encrypted on this device before upload. Same pose, same light, same time of day — that's what makes them comparable.</p>`;
-  if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
-    <button class="btn" data-act="unlockphotos">Unlock</button></div>
-    <p class="mini" style="margin-top:8px">Store this in your password manager. Lose it and the photos are gone — the training log is not encrypted precisely so that can never happen to your data.</p>`;
-  else h+=`<button class="btn wide" data-act="addphoto">Add today's photo</button>
-    <div class="ph" id="phgrid" style="margin-top:10px"></div>`;
-  h+=`</div>`;
-  const lastPhoto = S.photos.length ? [...S.photos].sort((a,b)=>a.d<b.d?1:-1)[0].d : null;
-  const dueIn = lastPhoto ? K.REVIEW_DAYS - daysBetween(lastPhoto, todayISO()) : 0;
-  h+=`<p class="why"><b>UI-01</b> Progress here is reviewed every 12 weeks${lastPhoto&&dueIn>0?`, next in ${dueIn} days`:""}. Eight weeks of hard direct work on a shoulder buys about a millimetre of muscle thickness, and a tape cannot resolve less than ${K.WAIST_MDC_CM} cm. A weekly number would be mostly noise — and noise you check daily starts to feel like failure.</p>`;
-  $("#v-body").innerHTML=h;
+    const w=waistStats();
+    h+=`<div class="card"><details><summary><b>Waist</b>${w&&w.median28!=null?` — ${r1(w.median28)} cm`:""}</summary>
+      <p class="mini" style="margin-top:8px">Mean of three, same site, same time of day. Optional — but it is the only measurement here that moves fast enough to mean anything.</p>
+      <div class="row"><input type="number" step="0.1" inputmode="decimal" id="w1" placeholder="1">
+        <input type="number" step="0.1" inputmode="decimal" id="w2" placeholder="2">
+        <input type="number" step="0.1" inputmode="decimal" id="w3" placeholder="3">
+        <button class="btn primary" data-act="logwaist">Log</button></div>`;
+    if(w && w.median28!=null && w.min90!=null){
+      const d=w.median28-w.min90;
+      h+= Math.abs(d) < K.WAIST_MDC_CM
+        ? `<p class="why"><b>No real change.</b> Within ${K.WAIST_MDC_CM} cm of your 90-day low, which is the smallest gap a tape can resolve.</p>`
+        : `<p class="why"><b>${d>0?"+":""}${r1(d)} cm</b> against your 90-day low.</p>`;
+    }
+    h+=`</details></div>`;
+
+    h+=`<div class="card"><details><summary><b>Photos</b>${S.photos.length?` — ${S.photos.length}`:""}</summary>
+      <p class="mini" style="margin-top:8px">Encrypted on this device before they go anywhere. Same pose, same light, same time of day.</p>`;
+    if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
+      <button class="btn" data-act="unlockphotos">Unlock</button></div>
+      <p class="mini" style="margin-top:8px">Keep this in your password manager. Lose it and the photos are gone — the training log is deliberately not encrypted so that can never happen to your actual data.</p>`;
+    else h+=`<button class="btn wide" data-act="addphoto">Add today's photo</button>
+      <div class="ph" id="phgrid" style="margin-top:10px"></div>`;
+    h+=`</details></div>`;
+  }
+
+  const all=S.diffs.slice().reverse().flatMap(g=>g.list.map(d=>({...d,date:g.date})));
+  h+=`<div class="card"><details><summary><b>Every decision it has made</b>${all.length?` — ${all.length}`:""}</summary>
+    <p class="mini" style="margin-top:8px">Nothing can change without a sentence here. A change with no reason attached throws rather than shipping quietly.</p>`;
+  if(!all.length) h+=`<p class="sub">Nothing yet.</p>`;
+  for(const d of all.slice(0,60)) h+=`<p class="why"><b>${esc(d.date)}</b> ${esc(d.sentence)} <span class="mini">${esc(d.rule)}</span></p>`;
+  h+=`</details></div>`;
+
+  h+=`<p class="why">Reviewed every 12 weeks, not weekly. Eight weeks of hard direct work on a shoulder buys about a millimetre of thickness, and a tape cannot resolve less than ${K.WAIST_MDC_CM} cm. A weekly number here would mostly be noise — and noise you check daily starts to feel like failure.</p>`;
+  $("#v-log").innerHTML=h;
   if(Photo.key) paintPhotos();
 }
+
+
 async function paintPhotos(){
   const g=$("#phgrid"); if(!g) return;
   const rows=[...S.photos].sort((a,b)=>a.d<b.d?1:-1).slice(0,12);
@@ -2010,89 +2069,96 @@ async function paintPhotos(){
   }
 }
 
-/* ----------------------------- SETUP ------------------------------ */
+/* ---------------------------- SETTINGS ----------------------------
+   Only the things worth tweaking are on the surface. The note is first
+   because it is the one input that can change tomorrow's session.
+   ------------------------------------------------------------------ */
 function renderSetup(){
   const st=S.settings, g=st.gym;
   const spotterOn=(Date.now()-(st.spotterAt||0))<4*3600e3;
   let h=syncBanner();
-  h+=`<div class="card"><h3>Backup</h3>
-    <p class="mini">Your log is written as plain NDJSON into a private GitHub repo — one file per training day. <code>git clone</code> and any text editor recovers all of it, forever, with no app.</p>
-    <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
-    <label class="fld"><span>Fine-grained token — Contents: read and write, that repo only</span>
-      <input type="password" id="tok" placeholder="${Sync.token?"•••••••• stored on this device":"github_pat_..."}"></label>
-    <button class="btn primary wide" data-act="savesync">Connect</button>
-    <p class="mini" style="margin-top:8px">Status: <b>${esc(Sync.state)}</b>${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} queued`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
-    <button class="btn wide" data-act="syncnow" style="margin-top:8px">Back up now</button></div>`;
 
-  h+=`<div class="card"><h3>Export</h3>
-    <p class="mini">Everything, as one file. Works with no account and no network.</p>
-    <button class="btn wide" data-act="export">Export everything</button>
-    <button class="btn wide" data-act="import" style="margin-top:8px">Import a backup</button></div>`;
+  h+=`<div class="card"><h3>Anything I should know?</h3>
+    <p class="mini">Plain words. If you mention a joint and something that sounds like pain, I'll offer to keep that joint out of your sessions.</p>
+    <textarea id="notein" rows="3" placeholder="e.g. tweaked my left shoulder benching"></textarea>
+    <button class="btn primary wide" data-act="savenote" style="margin-top:8px">Save note</button>`;
+  const flagged=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0);
+  if(flagged.length){
+    h+=`<div class="rule"></div><p class="mini">Currently flagged — these fade by a point a day.</p><div class="chips">`;
+    for(const j of flagged) h+=`<button class="chip" aria-pressed="true" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))} ${S.irr[j].sev}</button>`;
+    h+=`</div>`;
+  }
+  if(S.notes.length){
+    h+=`<div class="rule"></div><details><summary class="mini">Earlier notes (${S.notes.length})</summary>`;
+    for(const n of S.notes.slice().reverse().slice(0,15))
+      h+=`<p class="why"><b>${esc(n.d)}</b> ${esc(n.text)}</p>`;
+    h+=`</details>`;
+  }
+  h+=`</div>`;
 
-  h+=`<div class="card"><h3>Phase</h3><div class="chips">
-    ${["GAIN","MAINTAIN","CUT"].map(p=>`<button class="chip" aria-pressed="${st.phase===p}" data-act="phase" data-p="${p}">${p==="GAIN"?"Gaining":p==="CUT"?"Cutting":"Maintaining"}</button>`).join("")}
-    </div><p class="mini" style="margin-top:8px">Cutting freezes volume, holds load, and widens the deload trigger by 1.5× — a flat performance trend during a deficit is expected, not a fatigue signal.</p></div>`;
+  h+=`<div class="card"><h3>Right now I'm</h3><div class="chips">
+    ${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([p,l])=>`<button class="chip" aria-pressed="${st.phase===p}" data-act="phase" data-p="${p}" style="flex:1">${l}</button>`).join("")}
+    </div><p class="mini" style="margin-top:8px">Cutting holds your volume steady instead of chasing more, keeps the loads where they are, and widens the deload trigger — a flat trend in a deficit is expected, not a warning.</p></div>`;
 
-  h+=`<div class="card"><h3>Schedule</h3>
-    <p class="mini">Training days</p><div class="chips" style="margin:6px 0 10px">
-    ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}">${d}</button>`).join("")}</div>
-    <label class="fld"><span>Minutes per session</span><input type="number" id="mins" value="${st.minutes}"></label>
+  h+=`<div class="card"><h3>Training days</h3>
+    <div class="chips" style="margin:6px 0 10px">
+    ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}" style="flex:1;padding:0 8px">${d}</button>`).join("")}</div>
+    <label class="fld"><span>Minutes you usually have</span><input type="number" id="mins" value="${st.minutes}"></label>
     <button class="btn wide" data-act="savesched">Save</button></div>`;
 
+  h+=`<div class="card"><h3>Backup</h3>
+    <p class="mini">Your log goes to a private GitHub repo as plain text, one file per training day. <code>git clone</code> and any text editor gets it all back, forever, with no app.</p>
+    <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
+    <label class="fld"><span>Token — Contents: read and write, that repo only</span>
+      <input type="password" id="tok" placeholder="${Sync.token?"•••••••• stored on this device":"github_pat_..."}"></label>
+    <button class="btn primary wide" data-act="savesync">Connect</button>
+    <p class="mini" style="margin-top:8px">${esc(Sync.state)}${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} waiting`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
+    <button class="btn wide" data-act="syncnow" style="margin-top:8px">Back up now</button>
+    <div class="rule"></div>
+    <button class="btn wide" data-act="export">Export everything to a file</button>
+    <button class="btn wide" data-act="import" style="margin-top:8px">Import a backup</button></div>`;
+
+  h+=`<div class="card"><details><summary><b>Safety</b></summary>
+    <button class="btn wide" data-act="spotter" style="margin-top:8px">${spotterOn?"Spotter or pins set — active for 4 hours":"I have a spotter or pins right now"}</button>
+    <p class="mini" style="margin-top:6px">Off by default every session and never remembered. Without it, barbell bench, squat and overhead press are never prescribed closer than two reps from failure.</p>
+    <div class="rule"></div>
+    <p class="mini">Flag a joint directly:</p>
+    <div class="chips">${JOINTS.map(j=>`<button class="chip" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))}${(S.irr[j]||{sev:0}).sev?" "+S.irr[j].sev:""}</button>`).join("")}</div>
+    <div class="rule"></div>
+    <button class="btn wide danger" data-act="redflag">Report a symptom</button>
+    <div class="rule"></div>
+    <label class="row"><input type="checkbox" style="width:auto" ${st.screening==="LIGHT_MODERATE_ONLY"?"checked":""} data-act="screentoggle">
+      <span class="sub">Take it easy — cap everything at 3 reps in reserve</span></label>
+    <label class="row" style="margin-top:8px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
+      <span class="sub">Allow more than 20 sets a week for a muscle</span></label>
+    <p class="mini">Above 20 the evidence stops agreeing with itself.</p></details></div>`;
+
   h+=`<div class="card"><details><summary><b>Gym — ${esc(g.name)}</b></summary>
-    <p class="mini" style="margin-top:8px">This is what stops the app prescribing a weight your rack cannot make.</p>
+    <p class="mini" style="margin-top:8px">This is what stops the app asking for a weight your rack cannot make.</p>
     <div class="grid2">
       <label class="fld"><span>Units</span><select id="unit">${["lb","kg"].map(x=>`<option ${g.unit===x?"selected":""}>${x}</option>`).join("")}</select></label>
-      <label class="fld"><span>Bar weight (${esc(g.unit)})</span><input type="number" id="bar" step="0.5" value="${r1(fromKg(g.barKg,g.unit))}"></label>
+      <label class="fld"><span>Bar weight</span><input type="number" id="bar" step="0.5" value="${r1(fromKg(g.barKg,g.unit))}"></label>
       <label class="fld"><span>Dumbbells min</span><input type="number" id="dbmin" value="${g.dbSegments[0].lo}"></label>
       <label class="fld"><span>Dumbbells max</span><input type="number" id="dbmax" value="${g.dbSegments[g.dbSegments.length-1].hi}"></label>
       <label class="fld"><span>Dumbbell step</span><input type="number" id="dbstep" value="${g.dbSegments[0].step}"></label>
       <label class="fld"><span>Cable / stack step</span><input type="number" id="stack" value="${g.stackStep}"></label>
     </div>
-    <label class="fld"><span>Smallest plate pair (${esc(g.unit)})</span><input type="number" id="minplate" step="0.5" value="${Math.min(...g.plates.map(p=>p.w))}"></label>
+    <label class="fld"><span>Smallest plate pair</span><input type="number" id="minplate" step="0.5" value="${Math.min(...g.plates.map(p=>p.w))}"></label>
     <button class="btn wide" data-act="savegym">Save gym</button></details></div>`;
 
-  h+=`<div class="card"><h3>Safety</h3>
-    <button class="btn wide" data-act="spotter">${spotterOn?"Spotter / pins set — active for 4 h":"I have a spotter or pins right now"}</button>
-    <p class="mini" style="margin-top:6px">Defaults to off every session and is never remembered. Without it, barbell bench, squat and overhead press are never prescribed under 2 reps in reserve.</p>
-    <div class="rule"></div>
-    <button class="btn wide danger" data-act="redflag">Report a symptom</button>
-    <div class="rule"></div>
-    <p class="mini">Joint irritation decays a point a day. Reporting one keeps that joint away from failure work.</p>
-    <div class="chips">${JOINTS.map(j=>`<button class="chip" data-act="irr" data-j="${j}">${j.replace("_"," ")}${S.irr[j].sev?" "+S.irr[j].sev:""}</button>`).join("")}</div></div>`;
-
-  h+=`<div class="card"><h3>Screening</h3>
-    <p class="mini">Re-answer if anything changes. Current state: <b>${esc(st.screening)}</b>.</p>
-    <div class="chips"><button class="chip" aria-pressed="${st.screening==='CLEAR'}" data-act="screen" data-v="CLEAR">No conditions</button>
-    <button class="chip" aria-pressed="${st.screening==='LIGHT_MODERATE_ONLY'}" data-act="screen" data-v="LIGHT_MODERATE_ONLY">Something to work around</button></div>
-    <p class="mini" style="margin-top:8px">The conservative mode caps every set at 3 reps in reserve and every load at 70% of the estimate. Use it if a clinician has told you to take it easy.</p></div>`;
-
-  h+=`<div class="card"><h3>Volume ceiling</h3>
-    <label class="row"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
-    <span class="sub">Allow targets above 20 sets a week</span></label>
-    <p class="mini">Above 20 sets per muscle the evidence stops agreeing with itself. Off by default.</p></div>`;
-
-  /* The honesty block. Final copy, shown where the weights are, because a
-     number this soft should never appear without its own error bars. */
   h+=`<div class="card"><details><summary><b>What these numbers are, and what they aren't</b></summary><div style="margin-top:8px">
-    <p class="sub">The weights come from a small research literature on what strangers rate as attractive in photographs, CGI models and line drawings of men's bodies. That isn't the same as what happens between two people. When researchers measured actual outcomes instead of ratings — whether men with more muscle end up with more partners — the association is about <b>r = 0.08 to 0.13</b>: somewhere between half a percent and two percent of the variation. It's real. It's small. And it's correlational — nobody has ever measured the same man before and after a training block and rated him twice. That study does not exist.</p>
-    <p class="sub"><b>The per-muscle weights are the weakest part of this app.</b> Exactly one study has ever asked women about individual muscle groups. Thirteen of its fourteen muscles fall inside a one-point band on a seven-point scale, while individual raters disagreed with each other by more than that entire band. Traps is the only group that clearly separates. So this ships four tiers instead of sixteen numbers. Where you see 2.0 next to 1.25, that gap is a judgment about recovery cost and joint health — not a measured preference.</p>
-    <p class="sub"><b>Body fat is an estimate, not a measurement.</b> Whatever your scale or calipers say, the real number is probably within three to five points of it. So nothing in the plan triggers off a body-fat percentage. Everything triggers off waist and scale weight, measured the same way each time.</p>
-    <p class="sub"><b>The body is one input.</b> Nobody has measured what share of attractiveness it carries — this research removes faces by design. Height, face and voice all show up in it and none are things a training plan touches. This app optimises one slice of one channel, and the slice is smaller than the confidence with which it usually gets discussed.</p>
-    <p class="sub"><b>What stays on regardless:</b> no daily weight or waist on the home screen, a hard stop after 12 straight weeks in a deficit, a rate cap of 0.8% of bodyweight a week, no physique imagery, no streaks on eating, and a 12-week review cadence. Those are enforced in the planner, not suggested in the copy.</p></div></details></div>`;
-
-  h+=`<div class="card"><details><summary><b>Where the numbers came from</b></summary>
-    <p class="mini" style="margin-top:8px">Values this app treats as engineering guesses rather than findings, surfaced deliberately:</p>
-    <p class="why"><b>SEL-01</b> 9 sets per muscle per session. Not in the peer-reviewed literature — the figure it's derived from exists only as a preprint whose authors say the region is unresolved.</p>
-    <p class="why"><b>MIS-01</b> 14/28-day layoff bands. No trial has tested a complete 14-day layoff in trained lifters.</p>
-    <p class="why"><b>PRG-08</b> 2–10% load steps. ACSM committee consensus, not a trial.</p>
-    <p class="why"><b>κ, ψ</b> Fatigue priors, frozen until 40 observations. Currently priors, not estimates.</p>
-    <p class="why"><b>Visual weights</b> Four tiers, mostly judgment. The one per-muscle study asks an <i>ideal-point</i> question ("how muscled do you find X most attractive?"), which is a preferred level, not an importance ranking — reading it as a ranking is a category error, and it is why this vector is deliberately flat.</p>
-    <p class="why"><b>No muscularity ceiling</b> Curvature is real but nobody has located the peak: the best-powered test fits a vertex outside its own stimulus range, and the one study that tested a quadratic strength term found none significant. So diminishing returns live on the volume curve, never as a stop.</p>
-    <p class="why"><b>PHA-08</b> The 2.5 cm waist tripwire is calibrated to tape noise, not to any preference study.</p>
-    <p class="why"><b>Deleted as unverifiable</b> A 13-14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, and "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p></details></div>`;
+    <p class="sub">The weights come from a small literature on what strangers rate as attractive in photographs and CGI models of men's bodies. That isn't the same as what happens between two people. Where researchers measured actual outcomes instead of ratings, the association is about <b>r = 0.08 to 0.13</b> — half a percent to two percent of the variation. Real, small, and correlational: nobody has ever measured the same man before and after a training block and rated him twice.</p>
+    <p class="sub"><b>The per-muscle weights are the weakest part of this app.</b> One study has ever asked women about individual muscle groups. Thirteen of its fourteen muscles sit inside a one-point band on a seven-point scale, while raters disagreed with each other by more than that whole band. So this ships four tiers, not sixteen numbers. Where you see 2.0 beside 1.25, that gap is a judgment about recovery cost — not a measured preference.</p>
+    <p class="sub"><b>Body fat is an estimate.</b> Whatever your scale says, the truth is probably within three to five points of it, so nothing here triggers off a body-fat percentage. Everything triggers off waist and scale weight.</p>
+    <p class="sub"><b>The body is one input.</b> This research removes faces by design, so nobody has measured what share physique carries. Height, face and voice all appear in it and none are things a training plan touches.</p>
+    <p class="sub"><b>Always on:</b> no body numbers on the home screen, a hard stop after 12 straight weeks in a deficit, a 0.8%-a-week rate cap, no physique imagery, no streaks, 12-week reviews. Enforced in the planner, not suggested in the copy.</p>
+    <div class="rule"></div>
+    <p class="why"><b>Engineering guesses, labelled as such:</b> the 9-sets-per-session cap (absent from the peer-reviewed literature), the 14- and 28-day layoff bands (no trial), the 2–10% load steps (committee consensus), the two fatigue priors, and the 2.5 cm waist tripwire (calibrated to tape noise).</p>
+    <p class="why"><b>Deleted as unverifiable:</b> a 13–14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p>
+    </div></details></div>`;
   $("#v-setup").innerHTML=h;
 }
+
 
 /* ========================= SHEETS / PROMPTS ======================== */
 function sheet(html){ const s=$("#sheet"); s.className=""; s.innerHTML=`<div class="inner">${html}</div>`; }
@@ -2280,6 +2346,36 @@ async function handle(a,t,ev){
   /* ---- body ---- */
   case "logbw": { const v=+$("#bwin").value; if(!v) return;
     await append("weight",{d:todayISO(), kg:toKg(v,u())}); rebuild(); return render(); }
+  case "savenote": {
+    const text=($("#notein").value||"").trim();
+    if(!text) return;
+    await append("note",{d:todayISO(), text});
+    const scan=scanNote(text);
+    rebuild(); render();
+    /* Never act on parsed text silently. The scan is a suggestion; the tap is
+       the decision. Red flags take precedence over everything. */
+    if(scan.red.length){
+      sheet(`<h3>That needs a person, not an app</h3>
+        <p class="sub">You mentioned something this app is not able to assess. If any of it is happening now, stop training and speak to a clinician.</p>
+        <ul class="sub">${RED_FLAGS.map(f=>`<li>${esc(f)}</li>`).join("")}</ul>
+        <button class="btn wide danger" data-act="redflag-yes" style="margin-top:12px">One of these is happening</button>
+        <button class="btn wide" data-act="closesheet" style="margin-top:8px">Not one of those — just noted it</button>`);
+      return;
+    }
+    if(scan.joints.length){
+      const j=scan.joints[0];
+      sheet(`<h3>Want me to work around your ${esc(j.replace("_"," "))}?</h3>
+        <p class="sub">How bad is it, 0 to 10? Anything from 6 up and I'll pull exercises that load it out of your sessions entirely — the muscle still gets trained, through a different door. It fades by a point a day.</p>
+        <div class="chips" style="margin-top:12px">${[2,4,6,8,10].map(v=>`<button class="chip" data-act="irrset" data-j="${j}" data-v="${v}" style="flex:1">${v}</button>`).join("")}</div>
+        <button class="btn wide" data-act="closesheet" style="margin-top:10px">Leave it — just a note</button>
+        <p class="mini" style="margin-top:10px">Pain that is sharp, catching, or still there next morning is worth a clinician rather than a change of exercise.</p>`);
+      return;
+    }
+    return toast("Noted.", "ok");
+  }
+  case "screentoggle":
+    await append("settings",{screening: t.checked?"LIGHT_MODERATE_ONLY":"CLEAR"});
+    rebuild(); return render();
   case "logwaist": {
     const v=[+$("#w1").value, +$("#w2").value, +$("#w3").value].filter(x=>x>0);
     if(v.length<3) return toast("All three measures — a single reading is noise.");
@@ -2344,9 +2440,11 @@ async function handle(a,t,ev){
   case "unlockvol": await append("settings",{unlockHighVolume:t.checked}); rebuild(); return render();
   case "irr": {
     const j=t.dataset.j;
-    sheet(`<h3>${j.replace("_"," ")}</h3><p class="sub">How bad, 0–10? This keeps failure work off that joint and decays a point a day.</p>
-      <div class="chips" style="margin-top:10px">${[0,2,4,6,8,10].map(v=>`<button class="chip" data-act="irrset" data-j="${j}" data-v="${v}">${v}</button>`).join("")}</div>
-      <p class="mini" style="margin-top:10px">Sharp, catching, or pain that isn't gone next morning is worth a clinician, not a workout change.</p>`);
+    sheet(`<h3>${esc(j.replace("_"," "))}</h3>
+      <p class="sub">How bad, 0 to 10? Fades by a point a day.</p>
+      <div class="chips" style="margin-top:10px">${[0,2,4,6,8,10].map(v=>`<button class="chip" data-act="irrset" data-j="${j}" data-v="${v}" style="flex:1">${v}</button>`).join("")}</div>
+      <p class="why" style="margin-top:12px"><b>1–5</b> keeps failure sets off it. <b>6+</b> pulls every exercise that loads it out of your sessions. <b>0</b> clears the flag.</p>
+      <p class="mini">Sharp, catching, or still there next morning is worth a clinician rather than a change of exercise.</p>`);
     return;
   }
   case "irrset": await append("irritation",{joint:t.dataset.j, sev:+t.dataset.v, d:todayISO()});
