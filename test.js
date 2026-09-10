@@ -445,6 +445,141 @@ ok("its prescription is untouched", ctx.D_SETS===3, ctx.D_SETS+" sets");
 ok("it is marked as moved", ctx.D_MARK===1, ctx.D_MARK);
 ok("positions renumber after the reorder", ctx.D_POS==="1,2,3,4", ctx.D_POS);
 
+console.log("\nPRG-00 — warming up must not read as beating the target");
+run(`
+  function seed(exId, loadKg){
+    S.settings=defaultSettings(); S.settings.startDate="2026-04-01"; S.settings.rampUntil="2026-04-02";
+    for(const m of MUSCLES) S.mus[m]=newMuscleState();
+    for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+    S.ex={}; S.diffs=[]; S.sessions=[];
+    const es=exState(exId);
+    es.load=nearestLoad(loadableSet(LIBX[exId],S.settings.gym), loadKg);
+    es.seeded=true; es.sessions=9; es.target=6; es.lo=6; es.hi=10; es.hiEff=10;
+    return es;
+  }
+  /* The working sets carry the INFLATED priorHard the old commitSet used to
+     record (warm-ups counted as hard work). ingestSession must ignore the
+     recorded value and recompute from the session, which is what heals days
+     already written to disk. */
+  function work(exId,load,reps,n,warmups){
+    const sets=[]; const w=warmups||0;
+    for(let i=0;i<w;i++) sets.push({ex:exId,load:load*0.5,reps:10,pReps:6,
+      priorHard:i,hoursSince:72,warmup:true,rom:1,assisted:0});
+    for(let i=0;i<n;i++) sets.push({ex:exId,load,reps,pReps:6,
+      priorHard:w+i,hoursSince:72,warmup:false,rom:1,assisted:0});
+    return {date:"2026-04-20",week:"2026-W17",sets};
+  }
+  // exactly on target, no warm-ups
+  const A=seed("bb_bench", toKg(185,"lb")); const A0=A.load;
+  ingestSession(work("bb_bench",A.load,6,3,0));
+  CLEAN_LOAD=A.load; CLEAN_SAME=(A.load===A0);
+  CLEAN_RULE=(S.diffs.slice(-1)[0]||{list:[]}).list.map(d=>d.rule).join(",");
+  // exactly on target, after three warm-ups
+  const B=seed("bb_bench", toKg(185,"lb")); const B0=B.load;
+  ingestSession(work("bb_bench",B.load,6,3,3));
+  WARM_SAME=(B.load===B0); WARM_LB=Math.round(fromKg(B.load,"lb"));
+  WARM_RULE=(S.diffs.slice(-1)[0]||{list:[]}).list.map(d=>d.rule).join(",");
+  // genuinely beating it must still work
+  const C=seed("bb_bench", toKg(185,"lb")); const C0=C.load;
+  ingestSession(work("bb_bench",C.load,9,3,3));
+  BEAT_UP=(C.load>C0);
+`);
+ok("hitting the target exactly does not raise the load", ctx.CLEAN_SAME===true, ctx.CLEAN_RULE);
+ok("three warm-ups first changes nothing", ctx.WARM_SAME===true, ctx.WARM_LB+" lb, "+ctx.WARM_RULE);
+ok("genuinely beating the target still raises it", ctx.BEAT_UP===true);
+run(`
+  /* The recorded priorHard must be IGNORED. Two identical performances that
+     differ ONLY in the (previously inflated) value written on the event must
+     produce the same decision — otherwise a day with warm-ups progresses
+     faster than the same day without them. */
+  function overshoot(inflate){
+    const es=seed("bb_bench", toKg(185,"lb"));
+    const sets=[];
+    for(let i=0;i<3;i++) sets.push({ex:"bb_bench",load:es.load,reps:8,pReps:6,
+      priorHard: inflate ? 3+i : 0, hoursSince:72, warmup:false,rom:1,assisted:0});
+    ingestSession({date:"2026-04-20",week:"2026-W17",sets});
+    // the emitted sentence carries the computed delta, which is the thing the
+    // inflated value actually corrupts — the load can mask it by landing on
+    // the same rung of a coarse barbell.
+    const d=(S.diffs.slice(-1)[0]||{list:[]}).list.filter(x=>x.triggerVar==="delta")[0];
+    return d ? String(d.triggerValue) : "none";
+  }
+  HONEST_DELTA  = overshoot(false);
+  INFLATED_DELTA = overshoot(true);
+`);
+ok("the recorded priorHard cannot change the computed delta",
+   ctx.HONEST_DELTA===ctx.INFLATED_DELTA, "honest Δ="+ctx.HONEST_DELTA+" vs recorded-inflated Δ="+ctx.INFLATED_DELTA);
+
+console.log("\nVOL-01 — a 0.5 synergist is not a session for that muscle");
+run(`
+  S.settings=defaultSettings();
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  S.ex={}; exState("cable_row").load=toKg(100,"lb");
+  creditVolume({date:"2026-04-21",week:"2026-W17",sets:[
+    {ex:"cable_row",load:toKg(100,"lb"),reps:8,warmup:false}
+  ]});
+  ROW_MIDBACK_DONE = S.mus.mid_back.doneWeek;   // prime mover, 1.0
+  ROW_BICEPS_DONE  = S.mus.biceps.doneWeek;     // synergist, 0.5
+  ROW_BICEPS_VOL   = S.mus.biceps.fsWeek;
+  ROW_BICEPS_LAST  = S.mus.biceps.lastHard;
+`);
+ok("the prime mover counts as trained", ctx.ROW_MIDBACK_DONE===1, ctx.ROW_MIDBACK_DONE);
+ok("a 0.5 synergist does NOT count as a session", ctx.ROW_BICEPS_DONE===0, ctx.ROW_BICEPS_DONE);
+ok("but it still gets its half-set of credit", Math.abs(ctx.ROW_BICEPS_VOL-0.5)<1e-9, ctx.ROW_BICEPS_VOL);
+ok("and its 48-hour clock does not start", ctx.ROW_BICEPS_LAST==null, ctx.ROW_BICEPS_LAST);
+
+console.log("\nAssisted machines — more counterweight is EASIER");
+run(`
+  S.settings=defaultSettings();
+  ASET=loadableSet(LIBX["assisted_pullup"], S.settings.gym);
+  ASSIST_HARDER = harderLoad(LIBX["assisted_pullup"], ASET, ASET[4]);
+  ASSIST_DIR = ASSIST_HARDER < ASET[4];
+  BARBELL_HARDER = harderLoad(LIBX["bb_bench"], loadableSet(LIBX["bb_bench"],S.settings.gym), toKg(135,"lb"));
+  BARBELL_DIR = BARBELL_HARDER > toKg(135,"lb");
+  NO_OVERSHOOT = applyLoadStep([10,15,20,40], 10, 0.02, LIBX["bb_bench"]);
+`);
+ok("progressing an assisted lift REDUCES the stack", ctx.ASSIST_DIR===true, ctx.ASSIST_HARDER);
+ok("a normal lift still goes up", ctx.BARBELL_DIR===true);
+ok("a step never overshoots the request when a smaller rung exists", ctx.NO_OVERSHOOT===15, ctx.NO_OVERSHOOT);
+
+console.log("\nSAF-PIN — a swap must re-derive safety, not inherit it");
+run(`
+  S.settings=defaultSettings(); S.settings.spotterAt=0; S.settings.screening="CLEAR";
+  for(const m of MUSCLES) S.mus[m]=newMuscleState();
+  for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  S.ex={}; exState("bb_bench").load=toKg(185,"lb"); exState("pec_deck").load=toKg(100,"lb");
+  S.planEdits={};
+  SWPLAN = { date:"2026-04-22", minutes:60, notes:[], ctx:{minRir:1,allowFailure:true},
+    slots:[{ex:"pec_deck",muscle:"chest",sets:3,reps:10,rir:1,allowFailure:true,
+      name:"Pec deck",cls:"isolation",loadSet:[10],load:10,band:[10,15],calibration:true}] };
+  S.planEdits["2026-04-22"]=[{d:"2026-04-22",op:"swap",from:"pec_deck",to:"bb_bench",reason:"equipment"}];
+  SW = applyPlanEdits(SWPLAN,"2026-04-22");
+  SW_SLOT = SW.slots[0];
+  SW_RIR = SW_SLOT.rir; SW_FAIL = SW_SLOT.allowFailure; SW_CALIB = SW_SLOT.calibration;
+  SW_NOTE = (SW.notes||[]).filter(n=>n.rule==="PRG-10").length;
+`);
+ok("a swapped-in barbell bench is not left at 1 RIR", ctx.SW_RIR>=2, "rir="+ctx.SW_RIR);
+ok("and does not inherit 'last set to failure'", ctx.SW_FAIL===false);
+ok("the calibration set does not follow onto an unsafe lift", ctx.SW_CALIB===false);
+ok("and the user is told it moved", ctx.SW_NOTE>0);
+
+console.log("\nPlan edits must not accumulate on a started plan");
+run(`
+  S.settings=defaultSettings(); S.planEdits={}; S.plans={};
+  const D="2026-04-23";
+  S.plans[D] = { status:"started", date:D, minutes:90, notes:[], ctx:{}, slots:[
+    {ex:"leg_extension",muscle:"quads",sets:4,name:"Leg extension",cls:"isolation",reps:10,rir:1,loadSet:[10],load:10,band:[10,15]},
+    {ex:"cable_curl",muscle:"biceps",sets:4,name:"Cable curl",cls:"isolation",reps:10,rir:1,loadSet:[10],load:10,band:[10,15]} ]};
+  S.planEdits[D]=[{d:D,op:"time",minutes:20}];
+  const r1p=ensurePlan(D), r2p=ensurePlan(D), r3p=ensurePlan(D);
+  NOTE_COUNTS=[r1p.notes.length, r2p.notes.length, r3p.notes.length].join(",");
+  STORED_NOTES = S.plans[D].notes.length;
+  MIN_TRACKS = r3p.minutes;
+`);
+ok("repeated renders do not duplicate the note", ctx.NOTE_COUNTS==="1,1,1", ctx.NOTE_COUNTS);
+ok("the stored plan is never mutated by an edit", ctx.STORED_NOTES===0, ctx.STORED_NOTES);
+ok("minutes reflect the trimmed session", ctx.MIN_TRACKS<=22, ctx.MIN_TRACKS+" min");
+
 console.log("\nRENDER SMOKE — every view must actually build");
 run(`
   S.events=[]; S.settings=defaultSettings();

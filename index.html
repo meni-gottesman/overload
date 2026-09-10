@@ -578,15 +578,28 @@ function nearestLoad(set, want){
   for(const v of set){ const d=Math.abs(v-want); if(d<bd){bd=d;best=v;} }
   return best;
 }
-/* Apply a percentage step, but land on a load the gym can actually make.
-   If the requested step cannot move at least one real increment, it does
-   not silently round to zero — it returns null and the caller records
-   that the actuator could not execute the request. */
-function applyLoadStep(set, cur, pct){
-  const want = cur*(1+pct);
-  const cand = pct>0 ? set.filter(v=>v>cur+LOAD_EPS) : set.filter(v=>v<cur-LOAD_EPS);
+/* On an assisted machine the number IS counterweight: more of it makes the
+   lift EASIER. Progressing such a lift means going DOWN the stack. Treating it
+   like every other machine ran the progression backwards — beating the target
+   added assistance. */
+function inverted(e){ return !!e && e.profile==="assisted"; }
+function harderLoad(e, set, cur){ return inverted(e) ? prevLoad(set,cur) : nextLoad(set,cur); }
+/* Apply a percentage step and land on a load the gym can actually make,
+   without ever OVERSHOOTING what was asked for. Picking the value nearest the
+   requested percentage could jump past it — so a +2% request landed on a +9%
+   rung, the cap then rejected it, and the sentence named a weight that was
+   never going to be used. Take the largest legal step that does not exceed the
+   request; if none exists, take the smallest legal step and let the caller's
+   cap decide. Returns null when the rack has nothing in that direction. */
+function applyLoadStep(set, cur, pct, e){
+  const harder = pct>0;
+  const dir = inverted(e) ? -1 : 1;
+  const want = cur*(1 + pct*dir);
+  const cand = (harder === (dir>0)) ? set.filter(v=>v>cur+LOAD_EPS) : set.filter(v=>v<cur-LOAD_EPS);
   if(!cand.length) return null;
-  return nearestLoad(cand, want);
+  const within = dir>0 ? cand.filter(v=>v<=want+LOAD_EPS) : cand.filter(v=>v>=want-LOAD_EPS);
+  if(within.length) return dir>0 ? Math.max(...within) : Math.min(...within);
+  return dir>0 ? Math.min(...cand) : Math.max(...cand);
 }
 
 const RSF_DEFAULT_GYM = {
@@ -642,9 +655,15 @@ const kvGet=k=>tx("kv","readonly",s=>s.get(k));
 const kvPut=(k,v)=>tx("kv","readwrite",s=>s.put(v,k));
 const allEvents=()=>tx("events","readonly",s=>s.getAll());
 async function append(type,payload){
-  const ev={type,payload,ts:Date.now(),d:todayISO()};
-  const id=await tx("events","readwrite",s=>s.add(ev));
-  ev.id=id; S.events.push(ev); Sync.queue(ev); return ev;
+  /* Ids are assigned explicitly rather than by the store's key generator.
+     After an import restores events carrying their original ids, a generator
+     that restarted at 1 would hand new events ids that already exist and
+     overwrite restored history. voidSet payloads reference ids, so they cannot
+     simply be renumbered — the ids have to stay stable and unique. */
+  const nextId = S.events.reduce((m,e)=>Math.max(m, e.id||0), 0) + 1;
+  const ev={id:nextId, type, payload, ts:Date.now(), d:todayISO()};
+  await tx("events","readwrite",s=>s.put(ev));
+  S.events.push(ev); Sync.queue(ev); return ev;
 }
 
 /* ---- eviction canary: an empty store must never read as a fresh start ---- */
@@ -767,6 +786,13 @@ function rebuild(){
       S.plans[p.d] = plan;
     }
   }
+  // Tiers live in settings but the planner reads S.mus[*].tier, and nothing
+  // ever copied them across — so PRIORITY and MAINTAIN were dead code and
+  // every muscle behaved as STANDARD.
+  for(const m of MUSCLES){
+    const t = S.settings.tier && S.settings.tier[m];
+    S.mus[m].tier = (t==="PRIORITY"||t==="MAINTAIN"||t==="STANDARD") ? t : "STANDARD";
+  }
   // Ramp-in starts at ~60% of each muscle's budget share and climbs to it,
   // rather than from a flat number that may already exceed the share.
   for(const m of MUSCLES){
@@ -799,6 +825,25 @@ function exState(id){
   return S.ex[id];
 }
 
+/* Prior hard sets on the same muscle, earlier in THIS session. Warm-ups are
+   not hard sets; voided sets are already gone from sess.sets by the time
+   rebuild() gets here. Returned as a side Map because sess.sets holds the live
+   event payload objects — assigning to them would mutate the log itself. */
+function priorHardMap(sess){
+  const out=new Map(), seen=[];
+  for(const st of sess.sets){
+    if(st.warmup) continue;
+    const e=LIBX[st.ex]; if(!e) continue;
+    let prior=0;
+    for(const pst of seen){
+      const pe=LIBX[pst.ex]; if(!pe) continue;
+      for(const m of Object.keys(e.contributions)) if(pe.contributions[m]){ prior += pe.contributions[m]; break; }
+    }
+    out.set(st, r1(prior)); seen.push(st);
+  }
+  return out;
+}
+
 /* ---------- volume ledger (VOL-01) ---------- */
 function creditVolume(sess){
   const seen = {};
@@ -811,11 +856,17 @@ function creditVolume(sess){
     for(const [m,frac] of Object.entries(e.contributions)){
       if(!S.mus[m]) continue;
       S.mus[m].fsWeek += frac;
-      seen[m]=true;
+      seen[m]=(seen[m]||0)+frac;
       if(st.endpoint==="FAILED_CONCENTRIC") S.mus[m].failWeek += frac;
     }
   }
-  for(const m of Object.keys(seen)){ S.mus[m].doneWeek += 1; S.mus[m].lastHard = sess.date; }
+  /* A row paying 0.5 to biceps is not a biceps session. Counting it as one
+     marked the muscle done for the week and started its 48-hour clock, so it
+     never got direct work again. A session counts for a muscle only once it
+     has received a whole fractional set of credit. */
+  for(const m of Object.keys(seen)) if(seen[m] >= 1.0){
+    S.mus[m].doneWeek += 1; S.mus[m].lastHard = sess.date;
+  }
 }
 
 /* ============ PHASE 1 — ingest yesterday (PRG-00 .. PRG-10) ========
@@ -846,14 +897,29 @@ function ingestSession(sess){
     if(!W.length) continue;
 
     // --- PRG-00 fatigue-aware expectation --------------------------
-    let sumAch=0, sumExp=0;
+    /* priorHard is RECOMPUTED here rather than trusted from the event. The
+       value recorded at log time counted warm-ups and corrected-away sets as
+       hard work, which shrank the expectation, which inflated delta past the
+       deadband — so merely hitting your prescription after two warm-ups read
+       as "you beat the target" and the load went up. Recomputing from the
+       replayed session fixes days already on disk too, because rebuild() has
+       already dropped voided sets and warm-ups are skipped below. */
+    const priorOf = priorHardMap(sess);
+    let sumAch=0, sumExp=0, anyOver=false;
     for(const st of W){
+      const pr = priorOf.has(st) ? priorOf.get(st) : 0;
       const exp = (st.pReps||es.target)
-                - K.KAPPA*(st.priorHard||0)
+                - K.KAPPA*pr
                 - K.PSI*Math.exp(-(st.hoursSince==null?72:st.hoursSince)/24);
       sumAch += st.reps; sumExp += exp;
+      if(st.reps > (st.pReps||es.target)) anyOver = true;
     }
-    const delta = (sumAch - sumExp)/W.length;
+    let delta = (sumAch - sumExp)/W.length;
+    /* You cannot beat a target you were capped at. If nobody exceeded the
+       prescription, the fatigue discount alone must never manufacture a
+       surplus — otherwise doing exactly what you were told reads as a win and
+       the load ratchets until you start missing. */
+    if(!anyOver && delta > 0) delta = 0;
     const coldstart = es.sessions <= K.COLDSTART_SESSIONS;
 
     if(delta > -K.DEADBAND && delta < K.DEADBAND){          // PRG-01
@@ -871,11 +937,12 @@ function ingestSession(sess){
       const forced = es.consecOver >= K.FORCE_JUMP_EXPOSURES;
       let pct = K.UP_STEPS.find(([lim])=>delta<lim)[1];
       if(coldstart) pct = Math.min(K.COLDSTART_CAP_REL, Math.max(pct, 0.06));
-      const nl = applyLoadStep(set, es.load, pct);
+      const nl = applyLoadStep(set, es.load, pct, e);
       const capRel = coldstart ? K.COLDSTART_CAP_REL : K.CAP_REL[e.cls];
       const capAbs = e.cls==="lb_compound" ? K.CAP_ABS_LOWER : K.CAP_ABS_UPPER;
       const ceiling = e.band[1] + Math.floor(0.5*(e.band[1]-e.band[0]));
-      const withinCap = nl!=null && (nl-es.load)/es.load <= capRel && (nl-es.load) <= capAbs;
+      const jump = nl==null ? Infinity : Math.abs(nl-es.load);
+      const withinCap = nl!=null && jump/es.load <= capRel && jump <= capAbs;
       if(nl && (withinCap || forced || es.hiEff>=ceiling)){
         const o=es.load; es.load=nl; es.target=es.lo; es.hiEff=e.band[1]; es.consecOver=0;
         emit(diffs,"load",o,nl,"delta",r1(delta),forced?"PRG-07":"PRG-02",
@@ -884,7 +951,7 @@ function ingestSession(sess){
       } else if(es.hiEff < ceiling){
         const o=es.hiEff; es.hiEff += 1; es.target = Math.min(es.hiEff, es.target+1);
         emit(diffs,"hiEff",o,es.hiEff,"delta",r1(delta),"PRG-06",
-          nl ? `You beat the target, but the next weight up is a ${pct1((nl-es.load)/es.load)} jump — too big. Adding a rep instead.`
+          nl ? `You beat the target, but the next step is a ${pct1(Math.abs(nl-es.load)/es.load)} jump — too big. Adding a rep instead.`
              : `You beat the target but there is nothing heavier here — adding a rep instead.`);
       }
       es.consecShort=0;
@@ -896,7 +963,7 @@ function ingestSession(sess){
       } else {
         let pct = K.DOWN_STEPS.find(([lim])=>delta>lim)[1];
         if(coldstart) pct = Math.max(-K.COLDSTART_CAP_REL, pct);
-        const nl = applyLoadStep(set, es.load, pct);
+        const nl = applyLoadStep(set, es.load, pct, e);
         if(nl){ const o=es.load; es.load=nl; es.target=es.lo; es.consecShort=0;
           emit(diffs,"load",o,nl,"delta",r1(delta),"PRG-03",
             `Missed the target by ${r1(-delta)} reps a set twice — down to ${fmtLoad(nl)}.`);
@@ -932,12 +999,12 @@ function doubleProgression(e, es, set, diffs, W){        // PRG-04..PRG-08
       `Hit ${o} on every set — going for ${es.target} next time.`);
     return;
   }
-  const nxt = nextLoad(set, es.load);
-  const relInc = nxt ? (nxt-es.load)/es.load : Infinity;
+  const nxt = harderLoad(e, set, es.load);
+  const relInc = nxt ? Math.abs(nxt-es.load)/es.load : Infinity;
   const capRel = K.CAP_REL[e.cls], capAbs = e.cls==="lb_compound"?K.CAP_ABS_LOWER:K.CAP_ABS_UPPER;
   const ceiling = e.band[1] + Math.floor(0.5*(e.band[1]-e.band[0]));   // PRG-06
 
-  if(nxt && (relInc<=capRel && (nxt-es.load)<=capAbs || forced)){
+  if(nxt && (relInc<=capRel && Math.abs(nxt-es.load)<=capAbs || forced)){
     const o=es.load; es.load=nxt; es.target=es.lo; es.hiEff=e.band[1]; es.consecOver=0;
     emit(diffs,"load",o,nxt,forced?"consecOver":"toppedBand",forced?es.consecOver:true,
       forced?"PRG-07":"PRG-05",
@@ -1001,14 +1068,20 @@ function weeklyRollover(week){
       if(o!==ms.target) emit(diffs,"target",r1(o),r1(ms.target),"floor",K.MIN_SETS,"VOL-14",
         `${MUSCLE_LABEL[m]} came in under the ${K.MIN_SETS}-set floor — raising it. Structural balance, not appearance.`);
     }
+    /* A week with no index-lift data produced no new z, and the previous
+       week's value was pushed again — so one bad week could be counted three
+       times and fake a "down three weeks running" deload. Only a FRESH score
+       enters the window. */
+    ms.z = null;
     const a=indexScore(m,week), b=indexScore(m,prevWeek);
     if(a!=null && b!=null){
       const pd=a-b; ms.pd.push(pd); if(ms.pd.length>8) ms.pd.shift();
       const sigma = Math.max(K.SIGMA_FLOOR, sd(ms.pd));
       ms.z = pd/sigma;
     }
-    const roll3 = (ms.zHist=ms.zHist||[], ms.z!=null&&ms.zHist.push(ms.z), ms.zHist.length>3&&ms.zHist.shift(),
-                   ms.zHist.reduce((x,y)=>x+y,0));
+    ms.zHist = ms.zHist||[];
+    if(ms.z!=null){ ms.zHist.push(ms.z); if(ms.zHist.length>3) ms.zHist.shift(); }
+    const roll3 = ms.zHist.reduce((x,y)=>x+y,0);
     const deloadTrig = S.settings.phase==="CUT" ? K.ROLL3_DELOAD*K.CUT_DELOAD_MULT : K.ROLL3_DELOAD;
     const irrMax = Math.max(0, ...Object.values(S.irr).map(r=>(r&&r.sev)||0));
 
@@ -1302,10 +1375,10 @@ function ensurePlan(date){
   // ENG-02 never re-plan a started session — but only honour a stored plan that
   // actually carries one. A statusless stub must fall through and rebuild.
   if(stored && stored.status==="started" && Array.isArray(stored.slots) && stored.slots.length)
-    return applyPlanEdits(stored, date);
-  const p = applyPlanEdits(buildPlan(date), date);
-  S.plans[date] = Object.assign({status:"unstarted"}, p);
-  return S.plans[date];
+    return applyPlanEdits(clonePlan(stored), date);
+  const base = buildPlan(date);
+  S.plans[date] = Object.assign({status:"unstarted"}, base);
+  return applyPlanEdits(clonePlan(S.plans[date]), date);
 }
 
 function buildPlan(date){
@@ -1531,7 +1604,14 @@ const Sync = {
     this.pending = Array.isArray(pend) ? pend : [];
   },
   configured(){ return !!(this.token && this.owner && this.repo); },
-  queue(ev){ if(!this.configured()) return; this.pending.push(ev); this.schedule(); },
+  queue(ev){
+    if(!this.configured()) return;
+    this.pending.push(ev);
+    // Persist immediately: a tab discard inside the 15-second flush window
+    // used to lose the queue outright while the UI still claimed a clean backup.
+    kvPut("gh_pending", this.pending).catch(()=>{});
+    this.schedule();
+  },
   schedule(){ clearTimeout(this.timer); this.timer=setTimeout(()=>this.flush(), 15000); },
   async api(path, opts){
     const r = await fetch("https://api.github.com"+path, Object.assign({
@@ -1565,9 +1645,16 @@ const Sync = {
      ~31 files against the API's 1,000-file-per-directory ceiling. */
   async flush(){
     if(!this.configured() || !this.pending.length) return;
-    this.state="syncing"; render();
+    /* Never re-render mid-session from a background flush: it rebuilds the
+       load <select> and the rep stepper under the user's thumb, fifteen
+       seconds after every set. Only the Settings screen shows sync state. */
+    this.state="syncing"; if(VIEW==="setup") render();
+    /* Snapshot the batch. Clearing the whole queue after the round trip threw
+       away everything logged DURING the upload, while reporting success. */
+    const batch = this.pending.slice();
+    const batchIds = new Set(batch.map(e=>e.id));
     const byDate={};
-    for(const ev of this.pending) (byDate[ev.d]=byDate[ev.d]||[]).push(ev);
+    for(const ev of batch) (byDate[ev.d]=byDate[ev.d]||[]).push(ev);
     try{
       for(const [d, evs] of Object.entries(byDate)){
         const path = `log/${d.slice(0,4)}/${d.slice(5,7)}/${d}.ndjson`;
@@ -1580,14 +1667,45 @@ const Sync = {
         await this.putFile(path, body, `log ${d}: +${evs.length}`);
       }
       await this.putFile("state.json", JSON.stringify(snapshot(),null,1), "state snapshot");
-      this.pending=[]; this.lastOk=Date.now(); this.state="ok"; this.lastErr=null;
-      await kvPut("gh_pending",[]); await kvPut("gh_lastok",this.lastOk);
+      this.pending = this.pending.filter(e=>!batchIds.has(e.id));
+      this.lastOk=Date.now(); this.state="ok"; this.lastErr=null;
+      await kvPut("gh_pending", this.pending); await kvPut("gh_lastok",this.lastOk);
     }catch(err){
       this.state = this.state==="unauthorized"?"unauthorized":"error";
       this.lastErr = String(err.message||err);
       await kvPut("gh_pending", this.pending);
     }
-    render();
+    if(VIEW==="setup") render();
+  },
+  async listDir(path){
+    const r = await this.api(`/repos/${this.owner}/${this.repo}/contents/${path}`);
+    if(r.status===404) return [];
+    if(!r.ok) throw new Error("list "+r.status);
+    const j = await r.json();
+    return Array.isArray(j) ? j : [];
+  },
+  /* The eviction banner tells the user to restore from GitHub, so that has to
+     exist. Walks log/YYYY/MM/, parses the NDJSON back into events, and merges
+     by id — the repo IS the backup, and reading it back must not require a
+     separate export file the user may never have made. */
+  async pullAll(onProgress){
+    const out=[];
+    for(const year of await this.listDir("log")){
+      if(year.type!=="dir") continue;
+      for(const month of await this.listDir(year.path)){
+        if(month.type!=="dir") continue;
+        for(const f of await this.listDir(month.path)){
+          if(!/\.ndjson$/.test(f.name)) continue;
+          onProgress && onProgress(f.path);
+          const txt = await this.getFileText(f.path);
+          for(const line of (txt||"").split("\n")){
+            if(!line.trim()) continue;
+            try{ out.push(JSON.parse(line)); }catch(e){}
+          }
+        }
+      }
+    }
+    return out;
   },
   staleDays(){ return this.lastOk ? (Date.now()-this.lastOk)/864e5 : (S.events.length?999:0); },
 };
@@ -1731,7 +1849,7 @@ function lastPerformance(exId, beforeDate){
 function alternativesFor(exId, muscle, usedIds){
   const cur=LIBX[exId];
   const score = e => (1/Math.max(0.01, relIncrementOf(e))) + (2-e.stability) + (e.failSafe?2:0);
-  return LIB.filter(e=> e.id!==exId && available(e) && !usedIds.includes(e.id)
+  return LIB.filter(e=> e.id!==exId && available(e) && jointOK(e) && !usedIds.includes(e.id)
       && (e.contributions[muscle]||0) >= (cur && (cur.contributions[muscle]||0)>=1 ? 1 : 0.5))
     .sort((a,b)=> score(b)-score(a))
     .slice(0,4);
@@ -1751,13 +1869,33 @@ function applyPlanEdits(plan, date){
       const i=plan.slots.findIndex(s=>s.ex===ed.from);
       if(i<0) continue;
       const e=LIBX[ed.to]; if(!e) continue;
-      const es=exState(ed.to);
-      const old=plan.slots[i];
+      const es=exState(ed.to), old=plan.slots[i], pctx=plan.ctx||{};
+      /* Every safety field is RE-DERIVED for the new exercise. Inheriting rir
+         and allowFailure from the lift being replaced meant swapping a cable
+         fly for a barbell bench carried "last set to failure" along with it,
+         straight past SAF-PIN. */
+      const spotterFresh = (Date.now()-(S.settings.spotterAt||0)) < 4*3600e3;
+      const jointsClear = Object.keys(e.joints||{}).every(j=>!S.irr[j] || S.irr[j].sev===0);
+      const ms = S.mus[old.muscle] || {failWeek:0, target:1};
+      let rir = Math.max(e.cls==="isolation"?K.RIR_ISOLATION:K.RIR_COMPOUND, pctx.minRir||1);
+      if(!e.failSafe && !spotterFresh) rir = Math.max(rir, 2);
+      const allowFailure = pctx.allowFailure!==false && (e.failSafe||spotterFresh) && jointsClear
+        && ms.failWeek < K.FAILURE_SHARE*ms.target && S.settings.screening==="CLEAR" && !S.restricted;
+      const set = loadableSet(e, S.settings.gym);
+      let load = es.load;
+      if(pctx.loadCap && load!=null) load = nearestLoad(set, load*pctx.loadCap);
+      // A calibration set only survives onto a lift that is a legal site for one.
+      const keepCalib = !!old.calibration && e.failSafe && e.cls==="isolation" && jointsClear && allowFailure;
+      if(old.calibration && !keepCalib)
+        (plan.notes=plan.notes||[]).push({rule:"PRG-10",
+          text:`Calibration is off today — ${e.name} isn't a safe place to take a set to genuine failure.`});
       plan.slots[i]=Object.assign({}, old, { ex:e.id, name:e.name, cls:e.cls,
-        loadSet: loadableSet(e, S.settings.gym), load: es.load,
+        loadSet: set, load, rir, allowFailure,
         reps: es.target||e.band[0], band:[es.lo,es.hiEff], rest:e.rest,
+        risk:(e.failSafe?0:2)+e.failRisk,
+        irritated: Object.keys(e.joints||{}).filter(j=>S.irr[j]&&S.irr[j].sev>=4),
         needsSeed: es.load==null, romSensitive:e.romSensitive, romCue:e.romCue,
-        isIndex:false, calibration:false, substitutedFrom:ed.from, subReason:ed.reason });
+        isIndex:false, calibration:keepCalib, substitutedFrom:ed.from, subReason:ed.reason });
     } else if(ed.op==="time"){
       /* CAP-01 order matters. Trim SETS from the least visually-weighted
          muscles first — a set is the cheapest thing to give back, and the
@@ -1805,7 +1943,23 @@ function applyPlanEdits(plan, date){
     }
   }
   plan.slots.forEach((sl,i)=>sl.pos=i+1);
+  // Any edit can change the session's length; the header must not lie, and the
+  // "nothing to cut" guard reads this same number.
+  plan.minutes = Math.round(plan.slots.reduce((a,sl)=>{
+    const e=LIBX[sl.ex]; return a + (e?e.setup:45) + sl.sets*((e?e.rest:120)+32);
+  },0)/60);
   return plan;
+}
+/* Edits replay onto a COPY. Applying them to the stored plan mutated it in
+   place and re-ran on every render, so a time cut appended its CAP-01 note once
+   per render and the duplicates leaked into the persisted planStart payload,
+   the GitHub sync and the export. */
+function clonePlan(p){
+  return Object.assign({}, p, {
+    slots:(p.slots||[]).map(x=>Object.assign({}, x)),
+    notes:(p.notes||[]).slice(),
+    diffs:(p.diffs||[]).slice(),
+  });
 }
 
 /* ============================== UI ================================ */
@@ -2210,7 +2364,9 @@ function renderSetup(){
       <button class="btn grow" data-act="syncnow">Back up now</button>
       <button class="btn grow" data-act="export">Export to a file</button>
     </div>
-    <button class="btn wide" data-act="import" style="margin-top:8px">Import a backup</button></div>`;
+    <button class="btn wide" data-act="import" style="margin-top:8px">Import a backup file</button>
+    <button class="btn wide" data-act="restore" style="margin-top:8px">Restore from GitHub</button>
+    <p class="mini" style="margin-top:6px">Restore pulls every day back out of the repo and merges it. Nothing local is deleted — events already here are left alone.</p></div>`;
 
   h+=`<div class="card"><details><summary><b>My gym — ${esc(g.name)}</b></summary>
     <p class="mini" style="margin-top:8px">What stops the app asking for a weight your rack cannot make. Only worth touching if you change gyms.</p>
@@ -2246,7 +2402,15 @@ function renderSetup(){
 
 
 /* ========================= SHEETS / PROMPTS ======================== */
-function sheet(html){ const s=$("#sheet"); s.className=""; s.innerHTML=`<div class="inner">${html}</div>`; }
+function sheet(html){
+  /* The overlay styling lives on .sheet. Clearing className removed "hide" but
+     never added "sheet", so every prompt rendered as unstyled text at the
+     bottom of the document instead of over it — the RIR question on the last
+     set of every exercise appeared below the fold and looked like nothing
+     happened. */
+  const s=$("#sheet"); s.className="sheet"; s.innerHTML=`<div class="inner">${html}</div>`;
+  s.scrollIntoView && s.scrollIntoView({block:"nearest"});
+}
 /* No alert()/confirm() anywhere: a native modal on a phone blocks the whole
    page, and in a gym it is the difference between logging a set and losing it. */
 function toast(msg, kind){
@@ -2509,11 +2673,38 @@ async function handle(a,t,ev){
       await kvPut("gh_repo",{owner:o,repo:r}); await append("settings",{repo}); }
     if(tok){ Sync.token=tok; await kvPut("gh_token",tok); await append("settings",{tokenSet:true}); }
     Sync.state="idle";
+    /* The photo salt was pushed only at the moment it was generated, and only
+       if sync happened to be configured already. Unlock photos before
+       connecting GitHub and every encrypted photo in the repo became
+       permanently undecryptable. Push it whenever we connect. */
+    if(Sync.configured()){
+      const salt = await kvGet("photo_salt");
+      if(salt) try{ await Sync.putFile("photos/salt.b64", b64enc(salt instanceof Uint8Array?salt:new Uint8Array(salt)), "photo salt"); }catch(e){}
+      try{ await Sync.putFile("photos/DECRYPT.md", DECRYPT_MD, "how to decrypt without this app"); }catch(e){}
+    }
     for(const e of S.events) if(!Sync.pending.find(p=>p.id===e.id)) Sync.pending.push(e);
     await Sync.flush(); rebuild(); return render();
   }
   case "syncnow": for(const e of S.events) if(!Sync.pending.find(p=>p.id===e.id)) Sync.pending.push(e);
     await Sync.flush(); return render();
+  case "restore": {
+    if(!Sync.configured()) return toast("Connect the repo first.");
+    toast("Reading the repo…");
+    try{
+      const remote = await Sync.pullAll();
+      const have = new Set(S.events.map(e=>e.id));
+      let n=0;
+      for(const ev of remote){
+        if(!ev || ev.id==null || have.has(ev.id)) continue;
+        await tx("events","readwrite",st=>st.put(ev)); have.add(ev.id); n++;
+      }
+      S.events = await allEvents();
+      S.events.sort((a,b)=>(a.id||0)-(b.id||0));
+      rebuild(); render();
+      toast(n?`Restored ${n} entries from GitHub. Nothing local was replaced.`:"Nothing new in the repo — you're already up to date.", "ok");
+    }catch(e){ toast("Restore failed: "+(e.message||e), "bad"); }
+    return;
+  }
   case "export": return doExport();
   case "import": {
     const inp=document.createElement("input"); inp.type="file"; inp.accept=".txt,.json,text/plain,application/json";
@@ -2565,7 +2756,7 @@ async function handle(a,t,ev){
       <button class="btn wide" data-act="closesheet" style="margin-top:8px">No</button>`);
     return;
   }
-  case "redflag-yes": await append("redflag",{active:true}); closeSheet(); rebuild(); return go("today");
+  case "redflag-yes": await append("redflag",{active:true}); closeSheet(); rebuild(); return go("session");
   case "unblock": await append("redflag",{active:false}); rebuild(); return render();
   case "dismissfirst": await append("settings",{firstRun:false}); rebuild(); return render();
   case "closesheet": return closeSheet();
@@ -2589,12 +2780,23 @@ async function commitSet(exId, load, reps, rir, endpoint, extraReps){
   const slot=plan.slots.find(s=>s.ex===exId);
   // inputs to the fatigue-aware expectation, measured not assumed
   let priorHard=0;
-  for(const ev of S.events) if(ev.type==="set" && ev.payload.d===date){
+  for(const ev of S.events) if(ev.type==="set" && ev.payload.d===date
+      && !ev.payload.warmup && !S.voided.has(ev.id)){
     const pe=LIBX[ev.payload.ex]; if(!pe) continue;
     for(const m of Object.keys(e.contributions)) if(pe.contributions[m]) { priorHard += pe.contributions[m]; break; }
   }
   const m = slot?slot.muscle:Object.keys(e.contributions)[0];
-  const lastHard = S.mus[m] && S.mus[m].lastHard;
+  /* ms.lastHard is set to TODAY as soon as any set today is credited, so
+     reading it here made every set after the first record hoursSince = 0 —
+     a full 1.2-rep phantom fatigue bonus, and a different answer depending on
+     whether the page had been reloaded. Recovery means "since the last time I
+     trained this before today". */
+  let lastHard = null;
+  for(let i=S.sessions.length-1;i>=0;i--){
+    const sess=S.sessions[i];
+    if(sess.date>=date) continue;
+    if(sess.sets.some(x=>!x.warmup && LIBX[x.ex] && (LIBX[x.ex].contributions[m]||0)>=1)){ lastHard=sess.date; break; }
+  }
   const hoursSince = lastHard ? daysBetween(lastHard,date)*24 : 999;
   const es = exState(exId);
   const outlier = es.load && (load < K.OUTLIER_LO*es.load || load > K.OUTLIER_HI*es.load);
@@ -2612,6 +2814,9 @@ async function commitSet(exId, load, reps, rir, endpoint, extraReps){
     pos: slot?slot.pos:1, warmup:false, rom:1, assisted:0,
     calibration: !!(slot&&slot.calibration), extraReps: extraReps==null?null:extraReps });
   await canaryWrite(S.events.length);
+  // Weekly volume, per-exercise counts and the coach card all read derived
+  // state; without this the Progress tab reported zero all session.
+  rebuild();
 }
 
 async function doExport(){
@@ -2648,7 +2853,7 @@ window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reaso
     if(c.evicted){
       $("#boot").classList.add("hide");
       document.querySelector("main").insertAdjacentHTML("afterbegin",
-        `<div class="banner bad">This device had ${c.had} entries and now has none — the browser cleared the app's storage. Don't log anything yet. Restore from GitHub or an export first (Setup → Import).</div>`);
+        `<div class="banner bad">This device had ${c.had} entries and now has none — the browser cleared the app's storage. Don't log anything yet: go to <b>Settings → Backup → Restore from GitHub</b> first.</div>`);
     }
     if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
     // idempotent rollover: '!=' not '>', because westward travel and clock
@@ -2657,6 +2862,16 @@ window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reaso
     if(last !== todayISO()){ ensurePlan(todayISO()); await kvPut("last_rollover", todayISO()); }
     render();
     setInterval(()=>{ if(Sync.pending.length) Sync.flush(); }, 120000);
+    /* Left open across midnight, the app kept yesterday's plan and offered a
+       lift it had already trained as "first time on this one". '!=' not '>':
+       westward travel and clock corrections move the local date backwards. */
+    setInterval(async ()=>{
+      const now = todayISO();
+      if(now !== (await kvGet("last_rollover"))){
+        await kvPut("last_rollover", now);
+        rebuild(); OPEN_EX=null; Rest.clear(); ensurePlan(now); render();
+      }
+    }, 60000);
   }catch(e){
     $("#boot").textContent = "Failed to start: "+(e.message||e);
     console.error(e);
