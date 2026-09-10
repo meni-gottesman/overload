@@ -1784,10 +1784,18 @@ function applyPlanEdits(plan, date){
     } else if(ed.op==="sets"){
       const sl=plan.slots.find(s=>s.ex===ed.ex);
       if(sl) sl.sets=Math.max(1, Math.min(8, ed.sets));
+    } else if(ed.op==="defer"){
+      /* Someone is on the machine. Deferring keeps the lift and its whole
+         history — it just stops being next. That is a different thing from a
+         swap, and conflating them was the gap: a swap says "not this exercise",
+         a defer says "not this minute". */
+      const i=plan.slots.findIndex(s=>s.ex===ed.ex);
+      if(i>=0){ const [sl]=plan.slots.splice(i,1); sl.deferred=(sl.deferred||0)+1; plan.slots.push(sl); }
     } else if(ed.op==="drop"){
       plan.slots = plan.slots.filter(s=>s.ex!==ed.ex);
     }
   }
+  plan.slots.forEach((sl,i)=>sl.pos=i+1);
   return plan;
 }
 
@@ -1864,6 +1872,20 @@ function renderSession(){
     return;
   }
 
+  /* SAF-PIN, surfaced where it is actionable. The flag defaults false every
+     session and is never remembered — so it has to be asked for on the day,
+     and only when a lift that can pin you is actually on the list. */
+  const spotterFresh = (Date.now()-(S.settings.spotterAt||0)) < 4*3600e3;
+  const pinRisk = p.slots.filter(s=>LIBX[s.ex] && !LIBX[s.ex].failSafe);
+  if(pinRisk.length){
+    h += spotterFresh
+      ? `<div class="banner ok">Spotter or pins set — ${esc(pinRisk.map(s=>s.name.toLowerCase()).join(", "))} can go closer to failure for the next few hours.</div>`
+      : `<div class="card tight"><div class="row"><div class="grow">
+          <b>${esc(listOf(pinRisk.map(s=>s.name)))}</b> today
+          <div class="mini">Held two reps clear of failure unless you've got a spotter or the pins set.</div></div>
+          <button class="btn" data-act="spotter">I have one</button></div></div>`;
+  }
+
   const doneCount = p.slots.filter(s=>(logged[s.ex]||[]).filter(x=>!x.warmup).length >= s.sets).length;
   h += `<div class="card">
     <div class="row"><div class="grow">
@@ -1891,18 +1913,21 @@ function renderSession(){
         : done.length ? `${done.length} of ${s.sets} · ${esc(fmtL(e,done[done.length-1].load))}`
                       : `${s.sets} × ${s.reps}${s.load!=null?" · "+esc(fmtL(e,s.load)):""}`;
       h+=`<button class="exrow${complete?" is-done":""}" data-act="openex" data-ex="${s.ex}">
-        <span class="mark">${complete?"✓":"○"}</span>
-        <span class="grow"><b>${esc(s.name)}</b><span class="mini"> ${esc(MUSCLE_LABEL[s.muscle])}</span></span>
+        <span class="mark">${complete?"✓":s.pos}</span>
+        <span class="grow"><b>${esc(s.name)}</b><span class="mini"> ${esc(MUSCLE_LABEL[s.muscle])}${s.deferred?" · moved down":""}</span></span>
         <span class="mini num">${summary}</span></button>`;
       continue;
     }
 
     const last = lastPerformance(s.ex, date);
+    const alts = complete ? [] : alternativesFor(s.ex, s.muscle, p.slots.map(x=>x.ex));
     h+=`<div class="card ${complete?"spine ok":s.isIndex?"spine pri":""}">
       <div class="row"><div class="grow">
-        <h3>${esc(s.name)}</h3>
-        <div class="mini">${MUSCLE_LABEL[s.muscle]} · ${s.sets} × ${s.reps}${s.allowFailure?" · last set to failure":` · ${s.rir} in reserve`}</div>
+        <h3><span class="mini num" style="margin-right:6px">${s.pos}</span>${esc(s.name)}</h3>
+        <div class="mini">${MUSCLE_LABEL[s.muscle]} · ${s.sets} × ${s.reps}${s.allowFailure?" · last set to failure":` · ${s.rir} in reserve`}${s.deferred?" · moved down once":""}</div>
       </div>${complete?`<span class="pill ok">done</span>`:""}</div>`;
+    if(alts.length && !complete)
+      h+=`<p class="mini" style="margin-top:6px">If it's busy · ${esc(alts[0].name)}${alts[1]?" or "+esc(alts[1].name):""}</p>`;
 
     if(last) h+=`<p class="mini" style="margin-top:6px">Last time · ${last.sets.map(x=>x.reps).join(", ")} reps at ${esc(fmtL(e,last.sets[0].load))}</p>`;
     if(s.substitutedFrom) h+=`<p class="mini">Swapped in for ${esc((LIBX[s.substitutedFrom]||{}).name||s.substitutedFrom)}.</p>`;
@@ -1943,7 +1968,7 @@ function renderSession(){
       </div>
       <div class="chips">
         <button class="chip sm" data-act="warmup" data-ex="${s.ex}">Warm-up</button>
-        <button class="chip sm" data-act="swap" data-ex="${s.ex}" data-m="${s.muscle}">Swap</button>
+        <button class="chip sm" data-act="busy" data-ex="${s.ex}" data-m="${s.muscle}">It's taken</button>
         <button class="chip sm" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}">+ set</button>
       </div>
       ${isLast&&s.calibration?`<p class="why">Calibration set. Stop where you normally would and tap how many you had left — then keep going until you can't finish a rep, and tell me how many extra you got. It's the only thing that tells "you got stronger" apart from "you under-report".</p>`:""}
@@ -2120,26 +2145,31 @@ async function paintPhotos(){
 }
 
 /* ---------------------------- SETTINGS ----------------------------
-   Only the things worth tweaking are on the surface. The note is first
-   because it is the one input that can change tomorrow's session.
+   Only what actually changes about him is on the surface: what he's eating
+   for, when he trains, and anything that hurts. The gym inventory and the
+   provenance writeup are reference, not settings — they fold away. The
+   spotter flag moved to the session screen, because it is a per-session
+   fact you set standing at a rack, not a preference.
    ------------------------------------------------------------------ */
 function renderSetup(){
   const st=S.settings, g=st.gym;
-  const spotterOn=(Date.now()-(st.spotterAt||0))<4*3600e3;
   let h=syncBanner();
 
-  h+=`<div class="card"><h3>Anything I should know?</h3>
-    <p class="mini">Plain words. If you mention a joint and something that sounds like pain, I'll offer to keep that joint out of your sessions.</p>
-    <textarea id="notein" rows="3" placeholder="e.g. tweaked my left shoulder benching"></textarea>
-    <button class="btn primary wide" data-act="savenote" style="margin-top:8px">Save note</button>`;
+  h+=`<div class="card"><h3>Anything hurting?</h3>
+    <p class="mini">Plain words. Mention a joint and something that sounds like pain, and I'll offer to keep it out of your sessions.</p>
+    <textarea id="notein" rows="2" placeholder="e.g. tweaked my left shoulder benching"></textarea>
+    <button class="btn primary wide" data-act="savenote" style="margin-top:8px">Save</button>`;
   const flagged=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0);
   if(flagged.length){
-    h+=`<div class="rule"></div><p class="mini">Currently flagged — these fade by a point a day.</p><div class="chips">`;
+    h+=`<div class="rule"></div><p class="mini">Flagged now — these fade a point a day. Tap to change.</p><div class="chips">`;
     for(const j of flagged) h+=`<button class="chip" aria-pressed="true" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))} ${S.irr[j].sev}</button>`;
     h+=`</div>`;
+  } else {
+    h+=`<div class="rule"></div><details><summary class="mini">Flag a joint directly</summary>
+      <div class="chips" style="margin-top:8px">${JOINTS.map(j=>`<button class="chip sm" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))}</button>`).join("")}</div></details>`;
   }
   if(S.notes.length){
-    h+=`<div class="rule"></div><details><summary class="mini">Earlier notes (${S.notes.length})</summary>`;
+    h+=`<details style="margin-top:8px"><summary class="mini">Earlier notes (${S.notes.length})</summary>`;
     for(const n of S.notes.slice().reverse().slice(0,15))
       h+=`<p class="why"><b>${esc(n.d)}</b> ${esc(n.text)}</p>`;
     h+=`</details>`;
@@ -2147,14 +2177,18 @@ function renderSetup(){
   h+=`</div>`;
 
   h+=`<div class="card"><h3>Right now I'm</h3><div class="chips">
-    ${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([p,l])=>`<button class="chip" aria-pressed="${st.phase===p}" data-act="phase" data-p="${p}" style="flex:1">${l}</button>`).join("")}
-    </div><p class="mini" style="margin-top:8px">Cutting holds your volume steady instead of chasing more, keeps the loads where they are, and widens the deload trigger — a flat trend in a deficit is expected, not a warning.</p></div>`;
+    ${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([ph,l])=>`<button class="chip" aria-pressed="${st.phase===ph}" data-act="phase" data-p="${ph}" style="flex:1">${l}</button>`).join("")}
+    </div><p class="mini" style="margin-top:8px">Cutting holds your volume steady instead of chasing more, keeps loads where they are, and widens the deload trigger — a flat trend in a deficit is expected, not a warning.</p></div>`;
 
-  h+=`<div class="card"><h3>Training days</h3>
+  h+=`<div class="card"><h3>When I train</h3>
     <div class="chips" style="margin:6px 0 10px">
     ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}" style="flex:1;padding:0 8px">${d}</button>`).join("")}</div>
-    <label class="fld"><span>Minutes you usually have</span><input type="number" id="mins" value="${st.minutes}"></label>
-    <button class="btn wide" data-act="savesched">Save</button></div>`;
+    <div class="grid2">
+      <label class="fld"><span>Minutes I usually have</span><input type="number" id="mins" value="${st.minutes}"></label>
+      <label class="fld"><span>Bodyweight (${esc(u())})</span><input type="number" id="bwset" step="0.5" value="${r1(fromKg(st.bodyKg,u()))}"></label>
+    </div>
+    <button class="btn wide" data-act="savesched">Save</button>
+    <p class="mini" style="margin-top:6px">Bodyweight here only sets your protein floor (${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day). Daily weigh-ins go in Progress.</p></div>`;
 
   h+=`<div class="card"><h3>Backup</h3>
     <p class="mini">Your log goes to a private GitHub repo as plain text, one file per training day. <code>git clone</code> and any text editor gets it all back, forever, with no app.</p>
@@ -2163,28 +2197,14 @@ function renderSetup(){
       <input type="password" id="tok" placeholder="${Sync.token?"•••••••• stored on this device":"github_pat_..."}"></label>
     <button class="btn primary wide" data-act="savesync">Connect</button>
     <p class="mini" style="margin-top:8px">${esc(Sync.state)}${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} waiting`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
-    <button class="btn wide" data-act="syncnow" style="margin-top:8px">Back up now</button>
-    <div class="rule"></div>
-    <button class="btn wide" data-act="export">Export everything to a file</button>
+    <div class="row" style="margin-top:8px">
+      <button class="btn grow" data-act="syncnow">Back up now</button>
+      <button class="btn grow" data-act="export">Export to a file</button>
+    </div>
     <button class="btn wide" data-act="import" style="margin-top:8px">Import a backup</button></div>`;
 
-  h+=`<div class="card"><details><summary><b>Safety</b></summary>
-    <button class="btn wide" data-act="spotter" style="margin-top:8px">${spotterOn?"Spotter or pins set — active for 4 hours":"I have a spotter or pins right now"}</button>
-    <p class="mini" style="margin-top:6px">Off by default every session and never remembered. Without it, barbell bench, squat and overhead press are never prescribed closer than two reps from failure.</p>
-    <div class="rule"></div>
-    <p class="mini">Flag a joint directly:</p>
-    <div class="chips">${JOINTS.map(j=>`<button class="chip" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))}${(S.irr[j]||{sev:0}).sev?" "+S.irr[j].sev:""}</button>`).join("")}</div>
-    <div class="rule"></div>
-    <button class="btn wide danger" data-act="redflag">Report a symptom</button>
-    <div class="rule"></div>
-    <label class="row"><input type="checkbox" style="width:auto" ${st.screening==="LIGHT_MODERATE_ONLY"?"checked":""} data-act="screentoggle">
-      <span class="sub">Take it easy — cap everything at 3 reps in reserve</span></label>
-    <label class="row" style="margin-top:8px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
-      <span class="sub">Allow more than 20 sets a week for a muscle</span></label>
-    <p class="mini">Above 20 the evidence stops agreeing with itself.</p></details></div>`;
-
-  h+=`<div class="card"><details><summary><b>Gym — ${esc(g.name)}</b></summary>
-    <p class="mini" style="margin-top:8px">This is what stops the app asking for a weight your rack cannot make.</p>
+  h+=`<div class="card"><details><summary><b>My gym — ${esc(g.name)}</b></summary>
+    <p class="mini" style="margin-top:8px">What stops the app asking for a weight your rack cannot make. Only worth touching if you change gyms.</p>
     <div class="grid2">
       <label class="fld"><span>Units</span><select id="unit">${["lb","kg"].map(x=>`<option ${g.unit===x?"selected":""}>${x}</option>`).join("")}</select></label>
       <label class="fld"><span>Bar weight</span><input type="number" id="bar" step="0.5" value="${r1(fromKg(g.barKg,g.unit))}"></label>
@@ -2196,15 +2216,21 @@ function renderSetup(){
     <label class="fld"><span>Smallest plate pair</span><input type="number" id="minplate" step="0.5" value="${Math.min(...g.plates.map(p=>p.w))}"></label>
     <button class="btn wide" data-act="savegym">Save gym</button></details></div>`;
 
-  h+=`<div class="card"><details><summary><b>What these numbers are, and what they aren't</b></summary><div style="margin-top:8px">
-    <p class="sub">The weights come from a small literature on what strangers rate as attractive in photographs and CGI models of men's bodies. That isn't the same as what happens between two people. Where researchers measured actual outcomes instead of ratings, the association is about <b>r = 0.08 to 0.13</b> — half a percent to two percent of the variation. Real, small, and correlational: nobody has ever measured the same man before and after a training block and rated him twice.</p>
+  h+=`<div class="card"><details><summary><b>How this works, and what it can't do</b></summary><div style="margin-top:8px">
+    <p class="sub">The training weights come from a small literature on what strangers rate as attractive in photographs and CGI models of men's bodies. That isn't the same as what happens between two people. Where researchers measured actual outcomes instead of ratings, the association is about <b>r = 0.08 to 0.13</b> — half a percent to two percent of the variation. Real, small, and correlational: nobody has ever measured the same man before and after a training block and rated him twice.</p>
     <p class="sub"><b>The per-muscle weights are the weakest part of this app.</b> One study has ever asked women about individual muscle groups. Thirteen of its fourteen muscles sit inside a one-point band on a seven-point scale, while raters disagreed with each other by more than that whole band. So this ships four tiers, not sixteen numbers. Where you see 2.0 beside 1.25, that gap is a judgment about recovery cost — not a measured preference.</p>
     <p class="sub"><b>Body fat is an estimate.</b> Whatever your scale says, the truth is probably within three to five points of it, so nothing here triggers off a body-fat percentage. Everything triggers off waist and scale weight.</p>
     <p class="sub"><b>The body is one input.</b> This research removes faces by design, so nobody has measured what share physique carries. Height, face and voice all appear in it and none are things a training plan touches.</p>
-    <p class="sub"><b>Always on:</b> no body numbers on the home screen, a hard stop after 12 straight weeks in a deficit, a 0.8%-a-week rate cap, no physique imagery, no streaks, 12-week reviews. Enforced in the planner, not suggested in the copy.</p>
+    <p class="sub"><b>Always on, and not switchable:</b> no body numbers on the home screen, a hard stop after 12 straight weeks in a deficit, a 0.8%-a-week rate cap, no physique imagery, no streaks, 12-week reviews.</p>
     <div class="rule"></div>
     <p class="why"><b>Engineering guesses, labelled as such:</b> the 9-sets-per-session cap (absent from the peer-reviewed literature), the 14- and 28-day layoff bands (no trial), the 2–10% load steps (committee consensus), the two fatigue priors, and the 2.5 cm waist tripwire (calibrated to tape noise).</p>
     <p class="why"><b>Deleted as unverifiable:</b> a 13–14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p>
+    <div class="rule"></div>
+    <label class="row"><input type="checkbox" style="width:auto" ${st.screening==="LIGHT_MODERATE_ONLY"?"checked":""} data-act="screentoggle">
+      <span class="sub">Take it easy — cap everything at 3 reps in reserve</span></label>
+    <label class="row" style="margin-top:8px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
+      <span class="sub">Allow more than 20 sets a week for a muscle</span></label>
+    <button class="btn wide danger" data-act="redflag" style="margin-top:12px">Report a symptom</button>
     </div></details></div>`;
   $("#v-setup").innerHTML=h;
 }
@@ -2270,18 +2296,34 @@ async function handle(a,t,ev){
   switch(a){
   /* ---- session ---- */
   case "openex": OPEN_EX = (OPEN_EX===t.dataset.ex) ? null : t.dataset.ex; return render();
-  case "swap": {
+  case "busy": {
     const exId=t.dataset.ex, m=t.dataset.m;
     const plan=ensurePlan(todayISO());
     const alts=alternativesFor(exId, m, plan.slots.map(x=>x.ex));
-    if(!alts.length) return toast("Nothing else here hits that muscle.");
-    sheet(`<h3>Swap ${esc((LIBX[exId]||{}).name||"")}</h3>
-      <p class="sub">Same muscle, available at your gym, not already in today's session.</p>
-      <div class="stack" style="margin-top:12px">
-        ${alts.map(e=>`<button class="btn wide" data-act="swapto" data-from="${exId}" data-to="${e.id}">${esc(e.name)}</button>`).join("")}
-      </div>
-      <p class="mini" style="margin-top:12px">Your progress on the original is kept — swapping doesn't reset anything.</p>`);
+    const others=plan.slots.filter(x=>x.ex!==exId).length;
+    /* Two genuinely different answers to "someone's on it", and conflating
+       them was the gap. Later = same lift, same history, just not now.
+       Swap = a different lift, and the original's progress is still kept. */
+    sheet(`<h3>${esc((LIBX[exId]||{}).name||"")} is taken</h3>
+      <p class="sub">Don't wait. Either come back to it or do something else that trains the same muscle.</p>
+      ${others?`<button class="btn primary wide big" data-act="defer" data-ex="${exId}" style="margin-top:12px">Do it later — move it down</button>`:""}
+      ${alts.length?`<p class="mini" style="margin-top:14px">Or swap it for good today:</p>
+        <div class="stack">${alts.map(e=>`<button class="btn wide" data-act="swapto" data-from="${exId}" data-to="${e.id}">${esc(e.name)}</button>`).join("")}</div>`
+        : `<p class="mini" style="margin-top:12px">Nothing else here trains that muscle without doubling up a movement you're already doing.</p>`}
+      <p class="mini" style="margin-top:12px">Either way your history on ${esc((LIBX[exId]||{}).name||"it")} is kept — neither of these resets anything.</p>`);
     return;
+  }
+  case "defer": {
+    await ensureStarted();
+    await append("planEdit",{d:todayISO(), op:"defer", ex:t.dataset.ex});
+    closeSheet(); rebuild();
+    const p2=ensurePlan(todayISO());
+    const cnt = ex => S.events.filter(e=>e.type==="set" && !S.voided.has(e.id)
+      && e.payload.d===todayISO() && e.payload.ex===ex && !e.payload.warmup).length;
+    const next=p2.slots.find(x=>cnt(x.ex) < x.sets);
+    OPEN_EX = next?next.ex:null;
+    render();
+    return toast(next?`Moved down. Do ${LIBX[next.ex]?LIBX[next.ex].name.toLowerCase():"the next one"} instead.`:"Moved to the end.", "ok");
   }
   case "swapto": {
     await ensureStarted();
@@ -2479,7 +2521,13 @@ async function handle(a,t,ev){
   case "day": { const d=+t.dataset.d;
     const days = st.days.includes(d)?st.days.filter(x=>x!==d):st.days.concat(d).sort();
     await append("settings",{days}); rebuild(); return render(); }
-  case "savesched": await append("settings",{minutes:+$("#mins").value}); rebuild(); return render();
+  case "savesched": {
+    const patch={minutes:+$("#mins").value};
+    const bw=+($("#bwset")||{value:0}).value;
+    if(bw>0) patch.bodyKg = toKg(bw, u());
+    await append("settings",patch); rebuild(); render();
+    return toast("Saved.", "ok");
+  }
   case "savegym": {
     const un=$("#unit").value, mp=+$("#minplate").value;
     const gym=Object.assign({}, st.gym, { unit:un, barKg:toKg(+$("#bar").value,un),

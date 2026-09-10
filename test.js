@@ -422,6 +422,29 @@ console.log("\nBACKWARD COMPATIBILITY — a log written by v1 must still replay"
   ok("every decision still carries a rule and a sentence", ctx.BC_SENT===true);
 }
 
+console.log("\nDEFER — someone is on the machine; keep the lift, lose the wait");
+run(`
+  S.settings=defaultSettings(); S.planEdits={};
+  const mkd=(ex,muscle,isIndex)=>({ex,muscle,sets:3,isIndex,protected:!!isIndex,
+    name:LIBX[ex].name,cls:LIBX[ex].cls,reps:8,rir:2,loadSet:[10],load:10,band:[6,10]});
+  DPLAN = { date:"2026-07-06", minutes:60, notes:[], slots:[
+    mkd("lat_pulldown","lats",true), mkd("cable_lat_raise","delts_side",true),
+    mkd("leg_press","quads",true), mkd("cable_curl","biceps",false) ]};
+  D_BEFORE = DPLAN.slots.map(s=>s.ex).join(",");
+  S.planEdits["2026-07-06"]=[{d:"2026-07-06",op:"defer",ex:"lat_pulldown"}];
+  D1 = applyPlanEdits(DPLAN, "2026-07-06");
+  D_AFTER = D1.slots.map(s=>s.ex).join(",");
+  D_POS   = D1.slots.map(s=>s.pos).join(",");
+  D_KEPT  = D1.slots.length;
+  D_MARK  = (D1.slots.find(s=>s.ex==="lat_pulldown")||{}).deferred;
+  D_SETS  = (D1.slots.find(s=>s.ex==="lat_pulldown")||{}).sets;
+`);
+ok("the deferred lift goes to the end", /lat_pulldown$/.test(ctx.D_AFTER), ctx.D_AFTER);
+ok("nothing is lost", ctx.D_KEPT===4, ctx.D_KEPT);
+ok("its prescription is untouched", ctx.D_SETS===3, ctx.D_SETS+" sets");
+ok("it is marked as moved", ctx.D_MARK===1, ctx.D_MARK);
+ok("positions renumber after the reorder", ctx.D_POS==="1,2,3,4", ctx.D_POS);
+
 console.log("\nRENDER SMOKE — every view must actually build");
 run(`
   S.events=[]; S.settings=defaultSettings();
