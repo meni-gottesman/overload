@@ -7,7 +7,7 @@ const src=html.split('<script>\n"use strict";')[1].split("</script>")[0];
 
 const noop=()=>{};
 const stubEl={ classList:{add:noop,remove:noop,toggle:noop}, addEventListener:noop, setAttribute:noop,
-  querySelector:()=>stubEl, querySelectorAll:()=>[], insertAdjacentHTML:noop, set innerHTML(v){}, get innerHTML(){return""},
+  querySelector:()=>stubEl, querySelectorAll:()=>[], insertAdjacentHTML:noop, set innerHTML(v){ stubEl._html=String(v); }, get innerHTML(){return stubEl._html||"";},
   textContent:"", value:"", dataset:{}, click:noop, style:{} };
 const ctx={
   self:{}, top:{}, console,
@@ -608,13 +608,13 @@ run(`
   S.bw=[{d:"2026-06-20",kg:81.6}]; S.waist=[]; S.notes=[{d:"2026-06-20",text:"ok"}];
   S.diffs=[{date:"2026-06-19",list:[{rule:"PRG-02",sentence:"test",field:"load",old:1,new:2}]}];
   RENDER_ERR = [];
-  for(const [name,fn] of [["session",renderSession],["log",renderLog],["settings",settingsHtml],["body",bodyHtml]]){
+  for(const [name,fn] of [["session",renderSession],["log",renderLog],["more",moreRows],...SECTIONS.map(x=>["section:"+x.key, ()=>x.body()])]){
     try{ fn(); }catch(e){ RENDER_ERR.push(name+": "+e.message); }
   }
   // and again with data that exercises the other branches
   S.mus.lats.fsWeek=6; S.mus.lats.ladder="DELOAD"; S.restricted=false;
   S.irr.shoulder={sev:7,at:"2026-06-20",quality:"dull"};
-  for(const [name,fn] of [["session+flag",renderSession],["log+vol",renderLog],["settings+flag",settingsHtml]]){
+  for(const [name,fn] of [["session+flag",renderSession],["log+vol",renderLog],["more+flag",moreRows]]){
     try{ fn(); }catch(e){ RENDER_ERR.push(name+": "+e.message); }
   }
   S.restricted=true;
@@ -624,6 +624,31 @@ run(`
   RENDER_ERR = RENDER_ERR.join(" || ");
 `);
 ok("every view renders without throwing", ctx.RENDER_ERR==="", ctx.RENDER_ERR);
+
+console.log("\nSESSION STATES — done card and the +lb pill");
+run(`
+  S.restricted=false; S.irr.shoulder={sev:0,at:null,quality:null};
+  const today=todayISO();
+  const plan=ensurePlan(today);
+  const slot=plan.slots[0];
+  // A prior session on this lift, one rung lighter than what he lifts today.
+  S.sessions.push({date:"2026-06-10", week:isoWeek("2026-06-10"), sets:[{ex:slot.ex,load:(slot.load||20)-2.3,reps:8}], minutes:30});
+  S.plans[today]=Object.assign(clonePlan(plan),{status:"started"});
+  let id=S.events.length?Math.max(...S.events.map(e=>e.id))+1:1;
+  for(const sl of plan.slots) for(let i=0;i<sl.sets;i++)
+    S.events.push({id:id++, type:"set", at:Date.now(), payload:{d:today, ex:sl.ex, load:sl.load||20, reps:8, rir:1}});
+  OPEN_EX=slot.ex;              // keep the first lift expanded so its "Last time" line renders
+  renderSession();
+  const html=document.querySelector("#v-session").innerHTML;
+  DONE_CARD = /Done\\./.test(html) && html.includes("sets across");
+  UP_PILL = /pill ok[^>]*>\\+\\d+ (lb|kg)</.test(html);
+  ALL_MARKED = (html.match(/exrow is-done/g)||[]).length===plan.slots.length-1 && html.includes('pill ok">done<');
+  OPEN_EX=null;
+  S.events=S.events.filter(e=>e.type!=="set"||e.payload.d!==today); S.sessions.pop(); delete S.plans[today];
+`);
+ok("a finished session shows the Done card", ctx.DONE_CARD===true);
+ok("finished lifts collapse to ticked rows, the open one says done", ctx.ALL_MARKED===true);
+ok("beating last session's load shows a +lb pill", ctx.UP_PILL===true);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail?1:0);

@@ -6,7 +6,7 @@ Deployed on every push to `main`, twice:
   - Cloudflare Pages → https://overload-o3a.pages.dev  (isolated origin; `_headers` applies here only)
 Both serve the same commit. IndexedDB is per-origin, so they hold separate local logs
 until backup is connected. GitHub Pages ignores `_headers` and caches for 10 minutes.
-Tests: `node test.js` (93 assertions) **and** `node test-sync.js` (23 assertions, runs the
+Tests: `node test.js` (116 assertions) **and** `node test-sync.js` (31 assertions, runs the
 real Sync code against a mock GitHub and an in-memory IndexedDB). Both must be green.
 
 ## The one rule that outranks everything
@@ -95,6 +95,16 @@ Do not edit the fixture to make it pass — the fixture is the contract.
                             Committed here so img-src stays 'self' — never hotlink.
     data/                   staging for the overload-data repo (not committed here)
     .claude/launch.json     local preview on :8931, serving /tmp/ovl-serve
+
+## UI shape
+
+Two tabs, Today and Log. Everything that is not the session or the history lives in
+the `SECTIONS` registry (`{key, group, title, value(), warn(), hidden(), body()}`) and is
+reached through the **More** disclosure at the bottom of Log: `moreRows()` draws one
+grouped row per section with its current value trailing, and `openSection(key)` puts that
+section's `body()` in a sheet. `render()` re-opens `MORE_OPEN` so a control inside a sheet
+can change state and see the sheet refresh. To add a setting, add a section — do not add a
+tab, a card on Today, or a third place for it to live. `test.js` renders every section body.
 
 Rule ids in the code (`PRG-*`, `VOL-*`, `SEL-*`, `FAI-*`, `SAF-*`, `PHA-*`, `CAP-01`,
 `ENG-*`, `MIS-01`) are load-bearing: they appear in the user-facing audit trail. Keep them

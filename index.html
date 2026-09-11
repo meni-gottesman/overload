@@ -1,7 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-KfVZllwEKh1622K3UaSeMKgWMht5D4fK2GFAjLhRWMs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Hqqg2NsiBLVPgK0K7hTUIE91awhA+a2UTvjNSrRXaDw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#f3f4f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -119,6 +119,14 @@ nav button[aria-current="true"] .g{color:var(--accent)}
 .spine.ok{}
 .thumb{appearance:none;border:0;padding:0;background:var(--sunken);border-radius:12px;width:64px;height:64px;flex:0 0 64px;overflow:hidden;cursor:pointer;align-self:flex-start}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.week{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;padding:4px 0 10px}
+.wd{display:flex;flex-direction:column;align-items:center;gap:3px;padding:6px 0;border-radius:10px;color:var(--ink3)}
+.wd .wl{font:600 10px/1 var(--sans);letter-spacing:.06em;text-transform:uppercase}
+.wd .wn{font:600 var(--t-sm)/1 var(--mono);font-variant-numeric:tabular-nums;width:26px;height:26px;border-radius:13px;display:flex;align-items:center;justify-content:center}
+.wd.plan .wn{color:var(--ink);background:var(--sunken)}
+.wd.done .wn{color:var(--good);background:var(--good-bg)}
+.wd.today{color:var(--ink)}
+.wd.today .wn{background:var(--accent);color:var(--accent-ink)}
 .lede{display:flex;align-items:baseline;gap:10px;padding:6px 2px 12px;color:var(--ink3);font-size:var(--t-sm)}
 .lede b{color:var(--ink);font-family:var(--mono);font-weight:600;font-size:var(--t-lg);font-variant-numeric:tabular-nums}
 .lede .grow{flex:1}
@@ -167,6 +175,8 @@ label.fld>span{display:block;font:600 var(--t-xs)/1.3 var(--sans);color:var(--in
   padding:13px 4px;min-height:52px;margin:0;color:var(--ink);font:400 var(--t-md)/1.35 var(--sans);
 }
 .exrow:last-of-type{border-bottom:0}
+.mini-thumb{width:34px;height:34px;border-radius:8px;object-fit:cover;background:var(--sunken);flex:0 0 34px}
+.exrow.is-done .mini-thumb{opacity:.55}
 .exrow .mark{color:var(--ink3);font:500 var(--t-xs)/1 var(--mono);width:16px;flex:0 0 16px;text-align:right}
 .exrow b{font-family:var(--serif);font-weight:600;font-size:var(--t-md);letter-spacing:-.012em}
 .exrow .mini{margin-left:6px}
@@ -235,11 +245,24 @@ details[open] summary{margin-bottom:4px}
 .steps li{margin:0 0 6px}
 .empty{text-align:center;color:var(--ink3);padding:34px 12px;font-size:var(--t-sm)}
 details.more{margin:18px 0 0;padding:0 4px}
+.grp{font:600 var(--t-xs)/1 var(--sans);letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);margin:16px 0 6px 4px}
+.rows{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.srow{appearance:none;display:flex;align-items:center;gap:10px;width:100%;text-align:left;cursor:pointer;
+  background:none;border:0;border-bottom:1px solid var(--line);padding:0 14px;min-height:50px;color:var(--ink);font:500 var(--t-md)/1.3 var(--sans)}
+.srow:last-child{border-bottom:0}
+.srow .val{color:var(--ink3);font-size:var(--t-sm);font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;max-width:45%;overflow:hidden;text-overflow:ellipsis}
+.srow .val.warn{color:var(--warn)}
+.srow .chev{color:var(--ink3);font-size:18px}
 details.more>summary{color:var(--ink3);font-size:var(--t-sm)}
 details.more>summary b{color:var(--ink2);font-weight:600}
 details.more[open]>summary{color:var(--ink)}
 .bars{display:flex;align-items:flex-end;gap:3px;height:44px;margin:8px 0 4px}
 .bars i{flex:1;background:var(--accent);border-radius:2px 2px 0 0;min-height:2px;opacity:.75}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tile{background:var(--sunken);border-radius:12px;padding:12px 10px;display:flex;flex-direction:column;gap:3px;align-items:flex-start}
+.tile b{font-size:26px;line-height:1;font-weight:600;letter-spacing:-.02em}
+.tile b small{font-size:var(--t-sm);color:var(--ink2);font-weight:500;margin-left:2px}
+.tile span{font:500 var(--t-xs)/1 var(--sans);color:var(--ink2);letter-spacing:.02em}
 .vol{height:5px;background:var(--sunken);border-radius:3px;margin-top:5px;overflow:hidden}
 .vol i{display:block;height:100%;background:var(--accent);border-radius:3px}
 </style>
@@ -280,7 +303,7 @@ details.more[open]>summary{color:var(--ink)}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-11 16:00";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-11 16:20";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -2132,6 +2155,9 @@ function render(){
   $("#v-"+VIEW).classList.add("on");
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current", b.dataset.v===VIEW?"true":"false"));
   ({session:renderSession, log:renderLog})[VIEW]();
+  // a settings sheet stays open across the re-render its own action triggers,
+  // and must show the new state, not the one it was opened with
+  if(MORE_OPEN && $("#sheet").className==="sheet") openSection(MORE_OPEN);
 }
 function go(v){ VIEW=v; render(); window.scrollTo(0,0); }
 
@@ -2189,6 +2215,10 @@ function renderSession(){
           <button class="btn" data-act="spotter">I have them</button></div></div>`;
   }
 
+  /* The week at a glance: training days marked, done days ticked, today
+     highlighted. Answers "when is my next session" without a tap. */
+  h += weekStrip(date);
+
   const doneCount = p.slots.filter(s=>(logged[s.ex]||[]).filter(x=>!x.warmup).length >= s.sets).length;
   h += `<div class="lede"><b>${doneCount?`${doneCount} of ${p.slots.length}`:`${p.slots.length} lifts`}</b>
     <span class="grow">${esc(sessionLine(p))}</span>
@@ -2218,7 +2248,7 @@ function renderSession(){
                       : `${s.sets} × ${s.reps}${s.load!=null?" · "+esc(fmtL(e,s.load)):""}`;
       openList();
       h+=`<button class="exrow${complete?" is-done":""}" data-act="openex" data-ex="${s.ex}">
-        <span class="mark">${complete?"✓":s.pos}</span>
+        <span class="mark">${complete?"✓":s.pos}</span>${HOWTO[s.ex]?`<img class="mini-thumb" src="img/${s.ex}_0.jpg" alt="">`:""}
         <span class="grow"><b>${esc(s.name)}</b><span class="mini">${esc(MUSCLE_LABEL[s.muscle])}${s.deferred?" · moved down":""}</span></span>
         <span class="num">${summary}</span></button>`;
       continue;
@@ -2237,7 +2267,12 @@ function renderSession(){
     if(alts.length && !complete)
       h+=`<p class="mini" style="margin-top:8px">If it's busy: ${esc(alts[0].name)}${alts[1]?" or "+esc(alts[1].name):""}</p>`;
 
-    if(last) h+=`<p class="mini" style="margin-top:6px">Last time <span class="num">${last.sets.map(x=>x.reps).join(", ")}</span> at <span class="num">${esc(fmtL(e,last.sets[0].load))}</span></p>`;
+    if(last){
+      const curLoad = done.length ? done[done.length-1].load : s.load;
+      const dLb = (curLoad!=null && last.sets[0].load!=null) ? Math.round(fromKg(curLoad - last.sets[0].load, u())) : 0;
+      h+=`<p class="mini" style="margin-top:6px">Last time <span class="num">${last.sets.map(x=>x.reps).join(", ")}</span> at <span class="num">${esc(fmtL(e,last.sets[0].load))}</span>${
+        dLb>0 ? ` <span class="pill ok" style="margin-left:6px">+${dLb} ${esc(u())}</span>` : dLb<0 ? ` <span class="pill" style="margin-left:6px">${dLb} ${esc(u())}</span>` : ""}</p>`;
+    }
     if(s.substitutedFrom) h+=`<p class="mini">Swapped in for ${esc((LIBX[s.substitutedFrom]||{}).name||s.substitutedFrom)}.</p>`;
     if(s.irritated && s.irritated.length) h+=`<p class="mini">${esc(s.irritated.join(", "))} flagged — kept away from failure.</p>`;
 
@@ -2290,6 +2325,14 @@ function renderSession(){
 
 
   closeList();
+  if(doneCount===p.slots.length && p.slots.length){
+    const setsDone=Object.values(logged).flat().filter(x=>!x.warmup).length;
+    const ups=p.slots.filter(sl=>{ const lp=lastPerformance(sl.ex,date); const d=(logged[sl.ex]||[]).filter(x=>!x.warmup);
+      return lp && d.length && d[0].load > lp.sets[0].load + LOAD_EPS; }).length;
+    h+=`<div class="card live" style="text-align:center;padding:22px 16px"><h3>Done.</h3>
+      <p class="sub" style="margin:6px 0 0"><span class="num">${setsDone}</span> sets across <span class="num">${p.slots.length}</span> lifts${ups?` · <span class="num">${ups}</span> load${ups>1?"s":""} up on last time`:""}.</p>
+      <p class="mini" style="margin-top:6px">Tomorrow is planned from this the moment you finish.</p></div>`;
+  }
   // The only notes that belong on the session are the ones that reshaped it today.
   const loudNotes=(p.notes||[]).filter(n=>["SAF-05","CAP-01","MIS-01","OVERCONSTRAINED","PRG-10"].includes(n.rule));
   for(const n of loudNotes) h+=`<p class="why">${esc(n.text)}</p>`;
@@ -2297,6 +2340,18 @@ function renderSession(){
   $("#v-session").innerHTML=h;
 }
 
+function weekStrip(date){
+  // Monday-first, the ISO week the date sits in
+  const dw=(dow(date)+6)%7, mon=addDays(date,-dw);
+  const trained=new Set(S.sessions.map(x=>x.date));
+  let h=`<div class="week">`;
+  for(let i=0;i<7;i++){
+    const d=addDays(mon,i), isToday=d===date, plan=S.settings.days.includes(dow(d)), done=trained.has(d);
+    h+=`<div class="wd${isToday?" today":""}${plan?" plan":""}${done?" done":""}">
+      <span class="wl">${DAY_SHORT[dow(d)]}</span><span class="wn">${done?"✓":String(+d.slice(8))}</span></div>`;
+  }
+  return h+`</div>`;
+}
 function sessionLine(p){
   const bits=[`${p.minutes} min`];
   if(p.ramping) bits.push("easing in");
@@ -2350,43 +2405,127 @@ function coachCard(p){
    ------------------------------------------------------------------ */
 const LADDER_LABEL = { RAMP:"easing in", BUILD:"adding", HOLD:"steady",
   PROBE:"testing fewer", DELOAD:"recovering", MAINTAIN:"holding" };
-function bodyHtml(){
-  if(S.restricted) return "";   // hidden while the frequency cap is on
-  let h="";
-  const w=waistStats();
-  h+=`<div class="card"><details><summary><b>Waist</b>${w&&w.median28!=null?` — ${r1(w.median28)} cm`:""}</summary>
-    <p class="mini" style="margin-top:8px">Mean of three, same site, same time of day. Optional — but it is the only measurement here that moves fast enough to mean anything.</p>
-    <div class="row"><input type="number" step="0.1" inputmode="decimal" id="w1" placeholder="1">
-      <input type="number" step="0.1" inputmode="decimal" id="w2" placeholder="2">
-      <input type="number" step="0.1" inputmode="decimal" id="w3" placeholder="3">
-      <button class="btn primary" data-act="logwaist">Log</button></div>`;
-  if(w && w.median28!=null && w.min90!=null){
-    const d=w.median28-w.min90;
-    h+= Math.abs(d) < K.WAIST_MDC_CM
-      ? `<p class="why"><b>No real change.</b> Within ${K.WAIST_MDC_CM} cm of your 90-day low, which is the smallest gap a tape can resolve.</p>`
-      : `<p class="why"><b>${d>0?"+":""}${r1(d)} cm</b> against your 90-day low.</p>`;
+/* ================= EVERYTHING RARE: a registry of sections ============
+   Rendered as grouped rows — label, current value, chevron — and each one
+   opens in a sheet only when tapped. Nothing expands in place, so the More
+   list stays scannable at a glance and a control exists only while it is
+   being used. This is the settings idiom every phone user already knows.
+   ==================================================================== */
+const PH_LABEL={GAIN:"Building",MAINTAIN:"Maintaining",CUT:"Cutting"};
+const DAY_SHORT=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+let MORE_OPEN=null;   // key of the section currently in the sheet
+
+const SECTIONS = [
+  { key:"hurt", group:"You", title:"Anything hurting?",
+    value(){ const n=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0).length; return n?`${n} flagged`:"nothing flagged"; },
+    warn(){ return JOINTS.some(j=>(S.irr[j]||{sev:0}).sev>0); },
+    body(){
+      const st=S.settings; let h=`<p class="mini">Mention a joint and something that sounds like pain, and I'll offer to work around it.</p>
+        <textarea id="notein" rows="2" placeholder="e.g. tweaked my left shoulder benching"></textarea>
+        <button class="btn primary wide" data-act="savenote" style="margin-top:8px">Save</button>`;
+      const flagged=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0);
+      h+=`<div class="rule"></div><p class="mini">${flagged.length?"Flagged now — these fade a point a day. Tap to change.":"Flag a joint directly:"}</p><div class="chips">`;
+      for(const j of JOINTS) h+=`<button class="chip sm" aria-pressed="${flagged.includes(j)}" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))}${(S.irr[j]||{}).sev?" "+S.irr[j].sev:""}</button>`;
+      h+=`</div>
+        <label class="row" style="margin-top:12px"><input type="checkbox" style="width:auto" ${st.screening==="LIGHT_MODERATE_ONLY"?"checked":""} data-act="screentoggle">
+          <span class="sub">Take it easy — nothing closer than 3 reps from failure</span></label>
+        <button class="btn wide danger" data-act="redflag" style="margin-top:10px">Report a symptom</button>`;
+      if(S.notes.length){ h+=`<details style="margin-top:10px"><summary class="mini">Earlier notes (${S.notes.length})</summary>`;
+        for(const n of S.notes.slice().reverse().slice(0,15)) h+=`<p class="why"><b>${esc(n.d)}</b> ${esc(n.text)}</p>`; h+=`</details>`; }
+      return h; } },
+  { key:"phase", group:"You", title:"Right now I'm", value(){ return PH_LABEL[S.settings.phase]||""; },
+    body(){ const st=S.settings; return `<div class="chips">${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([ph,l])=>`<button class="chip" aria-pressed="${st.phase===ph}" data-act="phase" data-p="${ph}" style="flex:1">${l}</button>`).join("")}</div>
+      <p class="mini" style="margin-top:10px">Cutting holds volume steady, keeps loads where they are, and widens the deload trigger.</p>`; } },
+  { key:"days", group:"You", title:"When I train", value(){ return S.settings.days.map(d=>DAY_SHORT[d]).join(" "); },
+    body(){ const st=S.settings; return `<div class="chips" style="margin-bottom:12px">${DAY_SHORT.map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}" style="flex:1;padding:0 6px">${d}</button>`).join("")}</div>
+      <div class="grid2">
+        <label class="fld"><span>Minutes I usually have</span><input type="number" id="mins" value="${st.minutes}"></label>
+        <label class="fld"><span>Bodyweight (${esc(u())})</span><input type="number" id="bwset" step="0.5" value="${r1(fromKg(st.bodyKg,u()))}"></label>
+      </div>
+      <button class="btn wide" data-act="savesched">Save</button>
+      <p class="mini" style="margin-top:6px">Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day.</p>
+      <label class="row" style="margin-top:10px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol"><span class="sub">Let a muscle go past 20 sets a week</span></label>`; } },
+  { key:"gym", group:"You", title:"My gym", value(){ return S.settings.gym.name; },
+    body(){ const g=S.settings.gym; return `<p class="mini">Only worth touching if you change gyms.</p>
+      <div class="grid2">
+        <label class="fld"><span>Units</span><select id="unit">${["lb","kg"].map(x=>`<option ${g.unit===x?"selected":""}>${x}</option>`).join("")}</select></label>
+        <label class="fld"><span>Bar weight</span><input type="number" id="bar" step="0.5" value="${r1(fromKg(g.barKg,g.unit))}"></label>
+        <label class="fld"><span>Dumbbells min</span><input type="number" id="dbmin" value="${g.dbSegments[0].lo}"></label>
+        <label class="fld"><span>Dumbbells max</span><input type="number" id="dbmax" value="${g.dbSegments[g.dbSegments.length-1].hi}"></label>
+        <label class="fld"><span>Dumbbell step</span><input type="number" id="dbstep" value="${g.dbSegments[0].step}"></label>
+        <label class="fld"><span>Cable / stack step</span><input type="number" id="stack" value="${g.stackStep}"></label>
+      </div>
+      <label class="fld"><span>Smallest plate pair</span><input type="number" id="minplate" step="0.5" value="${Math.min(...g.plates.map(p=>p.w))}"></label>
+      <button class="btn wide" data-act="savegym">Save gym</button>`; } },
+
+  { key:"backup", group:"Data", title:"Backup",
+    value(){ return Sync.configured()?Sync.state:"not connected"; },
+    warn(){ return !Sync.configured() || Sync.state==="unauthorized" || Sync.state==="error"; },
+    body(){ const st=S.settings; return `<p class="mini">Plain text in a private GitHub repo, one file per training day. <code>git clone</code> gets it all back with no app.</p>
+      <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
+      <label class="fld"><span>Token — Contents: read and write, that repo only, 90-day expiry</span>
+        <input type="password" id="tok" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${Sync.token?"•••••••• sealed on this device":"github_pat_..."}"></label>
+      <button class="btn primary wide" data-act="savesync">Connect</button>
+      <p class="mini" style="margin-top:8px">${esc(Sync.state)}${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} waiting`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
+      <div class="row" style="margin-top:8px"><button class="btn grow" data-act="syncnow">Back up now</button><button class="btn grow" data-act="export">Export to a file</button></div>
+      <div class="row" style="margin-top:8px"><button class="btn grow" data-act="import">Import a file</button><button class="btn grow" data-act="restore">Restore from GitHub</button></div>
+      <p class="mini" style="margin-top:6px">Restore merges the repo back in. Nothing local is deleted.</p>`; } },
+  { key:"waist", group:"Data", title:"Waist", hidden(){ return S.restricted; },
+    value(){ const w=waistStats(); return w&&w.median28!=null?`${r1(w.median28)} cm`:"—"; },
+    body(){ const w=waistStats(); let h=`<p class="mini">Mean of three, same site, same time of day.</p>
+      <div class="row"><input type="number" step="0.1" inputmode="decimal" id="w1" placeholder="1"><input type="number" step="0.1" inputmode="decimal" id="w2" placeholder="2"><input type="number" step="0.1" inputmode="decimal" id="w3" placeholder="3"><button class="btn primary" data-act="logwaist">Log</button></div>`;
+      if(w && w.median28!=null && w.min90!=null){ const d=w.median28-w.min90;
+        h+= Math.abs(d)<K.WAIST_MDC_CM ? `<p class="why"><b>No real change.</b> Within ${K.WAIST_MDC_CM} cm of your 90-day low, the smallest gap a tape can resolve.</p>`
+                                        : `<p class="why"><b>${d>0?"+":""}${r1(d)} cm</b> against your 90-day low.</p>`; }
+      return h; } },
+  { key:"photos", group:"Data", title:"Photos", hidden(){ return S.restricted; },
+    value(){ return S.photos.length?`${S.photos.length}`:"none"; },
+    body(){ let h=`<p class="mini">Encrypted on this device before anything is uploaded. Same pose, same light, same time of day.</p>`;
+      if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase"><button class="btn" data-act="unlockphotos">Unlock</button></div>
+        <p class="mini" style="margin-top:8px">Keep this in your password manager. Lose it and the photos are gone — the training log is deliberately not encrypted so that can never happen to your data.</p>`;
+      else h+=`<button class="btn wide" data-act="addphoto">Add today's photo</button><div class="ph" id="phgrid" style="margin-top:10px"></div>`;
+      return h; } },
+  { key:"decisions", group:"Data", title:"Every decision it has made",
+    value(){ return String(S.diffs.reduce((a,g)=>a+g.list.length,0)); },
+    body(){ const all=S.diffs.slice().reverse().flatMap(g=>g.list.map(d=>({...d,date:g.date})));
+      let h=`<p class="mini">Nothing can change without a sentence here.</p>`;
+      if(!all.length) h+=`<p class="sub">Nothing yet.</p>`;
+      for(const d of all.slice(0,80)) h+=`<p class="why"><b>${esc(d.date)}</b> ${esc(d.sentence)} <span class="mini">${esc(d.rule)}</span></p>`;
+      return h; } },
+
+  { key:"about", group:"About", title:"What these numbers are, and what they aren't", value(){ return ""; },
+    body(){ return `<p class="sub">The training weights come from a small literature on what strangers rate as attractive in photographs and CGI models of men's bodies. That isn't the same as what happens between two people. Where researchers measured actual outcomes instead of ratings, the association is about <b>r = 0.08 to 0.13</b> — half a percent to two percent of the variation. Real, small, and correlational: nobody has ever measured the same man before and after a training block and rated him twice.</p>
+      <p class="sub"><b>The per-muscle weights are the weakest part of this app.</b> One study has ever asked women about individual muscle groups. Thirteen of its fourteen muscles sit inside a one-point band on a seven-point scale, while raters disagreed with each other by more than that whole band. So this ships four tiers, not sixteen numbers. Where you see 2.0 beside 1.25, that gap is a judgment about recovery cost — not a measured preference.</p>
+      <p class="sub"><b>Body fat is an estimate.</b> Whatever your scale says, the truth is probably within three to five points of it, so nothing here triggers off a body-fat percentage. Everything triggers off waist and scale weight.</p>
+      <p class="sub"><b>The body is one input.</b> This research removes faces by design, so nobody has measured what share physique carries. Height, face and voice all appear in it and none are things a training plan touches.</p>
+      <p class="sub"><b>Always on, and not switchable:</b> no body numbers on the home screen, a hard stop after 12 straight weeks in a deficit, a 0.8%-a-week rate cap, no physique imagery, no streaks, 12-week reviews.</p>
+      <div class="rule"></div>
+      <p class="why"><b>Engineering guesses, labelled as such:</b> the 9-sets-per-session cap (absent from the peer-reviewed literature), the 14- and 28-day layoff bands (no trial), the 2–10% load steps (committee consensus), the two fatigue priors, and the 2.5 cm waist tripwire (calibrated to tape noise).</p>
+      <p class="why"><b>Deleted as unverifiable:</b> a 13–14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p>
+      <p class="mini" style="text-align:center;margin-top:14px">build ${BUILD}</p>`; } },
+];
+
+function moreRows(){
+  let h="", group=null;
+  const hid=(S.settings.dismissed||[]);
+  for(const sec of SECTIONS){
+    if(sec.hidden && sec.hidden()) continue;
+    if(sec.group!==group){ if(group) h+=`</div>`; group=sec.group; h+=`<p class="grp">${esc(group)}</p><div class="rows">`; }
+    const v=sec.value(), w=sec.warn&&sec.warn();
+    h+=`<button class="srow" data-act="more" data-k="${sec.key}"><span class="grow">${esc(sec.title)}</span>${v?`<span class="val ${w?"warn":""}">${esc(v)}</span>`:""}<span class="chev">›</span></button>`;
   }
-  h+=`</details></div>`;
-
-  const photoBytes = S.photos.reduce((a,p)=>a+(p.bytes||0),0);
-  h+=`<div class="card"><details><summary><b>Photos</b>${S.photos.length?` — ${S.photos.length}, ${photoBytes>1048576?(photoBytes/1048576).toFixed(1)+" MB":Math.round(photoBytes/1024)+" KB"} total`:""}</summary>
-    <p class="mini" style="margin-top:8px">Compressed to about 150 KB and encrypted on this device before anything is uploaded. Same pose, same light, same time of day.</p>`;
-  if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
-    <button class="btn" data-act="unlockphotos">Unlock</button></div>
-    <p class="mini" style="margin-top:8px">Keep this in your password manager. Lose it and the photos are gone — the training log is deliberately not encrypted so that can never happen to your actual data.</p>`;
-  else h+=`<button class="btn wide" data-act="addphoto">Add today's photo</button>
-    <div class="ph" id="phgrid" style="margin-top:10px"></div>`;
-  h+=`</details></div>`;
-
-  const all=S.diffs.slice().reverse().flatMap(g=>g.list.map(d=>({...d,date:g.date})));
-  h+=`<div class="card"><details><summary><b>Every decision it has made</b>${all.length?` — ${all.length}`:""}</summary>
-  <p class="mini" style="margin-top:8px">Nothing can change without a sentence here. A change with no reason attached throws rather than shipping quietly.</p>`;
-  if(!all.length) h+=`<p class="sub">Nothing yet.</p>`;
-  for(const d of all.slice(0,60)) h+=`<p class="why"><b>${esc(d.date)}</b> ${esc(d.sentence)} <span class="mini">${esc(d.rule)}</span></p>`;
-  h+=`<p class="mini" style="margin-top:10px">Reviewed every 12 weeks, not weekly: eight weeks of direct shoulder work buys about a millimetre, and a tape can't resolve less than ${K.WAIST_MDC_CM} cm. A weekly number would be noise, and noise you check daily starts to feel like failure.</p>`;
-  h+=`</details></div>`;
+  if(group) h+=`</div>`;
+  if(hid.length) h+=`<div class="rows" style="margin-top:10px"><button class="srow" data-act="unhide"><span class="grow">Show ${hid.length} hidden coach note${hid.length>1?"s":""} again</span><span class="chev">›</span></button></div>`;
   return h;
 }
+function openSection(key){
+  const sec=SECTIONS.find(s=>s.key===key); if(!sec) return;
+  MORE_OPEN=key;
+  sheet(`<h3>${esc(sec.title)}</h3><div style="margin-top:10px">${sec.body()}</div>
+    <button class="btn wide" data-act="closesheet" style="margin-top:14px">Done</button>`);
+  if(key==="photos" && Photo.key) paintPhotos();
+}
+
 
 function renderLog(){
   let h=syncBanner();
@@ -2405,7 +2544,7 @@ function renderLog(){
       const label=d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
       h+=`<details ${i===0?"open":""}><summary><b>${esc(label)}</b><span class="mini" style="margin-left:8px">${lifts.length} lift${lifts.length===1?"":"s"} · ${sess.sets.filter(x=>!x.warmup).length} sets</span></summary>`;
       for(const ex of lifts){ const e=LIBX[ex]; if(!e) continue; const sets=byEx[ex];
-        h+=`<div class="setline"><span class="grow" style="font-family:var(--serif);font-weight:600">${esc(e.name)}</span>
+        h+=`<div class="setline">${HOWTO[ex]?`<img class="mini-thumb" src="img/${ex}_0.jpg" alt="">`:""}<span class="grow" style="font-family:var(--serif);font-weight:600">${esc(e.name)}</span>
           <span class="lg">${esc(fmtL(e,sets[0].load))} × ${sets.map(x=>x.reps).join(", ")}</span></div>`;
       }
       h+=`</details>`;
@@ -2424,17 +2563,38 @@ function renderLog(){
     h+=`</table></div></div>`;
   }
 
-  h+=`<div class="card"><h3>This week</h3>
-    <p class="mini">Done against planned. A lift hitting two muscles counts whole for the main one, half for the other.</p>`;
-  for(const m of MUSCLES){ const ms=S.mus[m];
-    if(NO_DIRECT.has(m) && !ms.fsWeek) continue;
-    if(!ms.fsWeek && !ms.target) continue;
-    const w=Math.min(100, 100*ms.fsWeek/Math.max(1,ms.target));
-    h+=`<div class="setline"><span class="grow">${MUSCLE_LABEL[m]}<div class="vol"><i style="width:${w}%"></i></div></span>
-      <span class="lg">${r1(ms.fsWeek)}/${r1(ms.target)}</span>
-      <span class="tag">${esc(LADDER_LABEL[ms.ladder]||ms.ladder)}</span></div>`;
+  /* Three numbers, then the detail behind a tap. Sixteen muscle rows was a
+     wall; the question it answers — am I on track this week — is three
+     figures. Sessions done against planned, sets done against the budget,
+     and how many lifts moved up. */
+  {
+    const wk=isoWeek(todayISO());
+    const thisWeek=S.sessions.filter(x=>x.week===wk);
+    const planned=S.settings.days.length;
+    const setsDone=MUSCLES.reduce((a,m)=>a+S.mus[m].fsWeek,0);
+    const setsPlan=MUSCLES.reduce((a,m)=>a+S.mus[m].target,0);
+    const ups=thisWeek.reduce((n,sess)=>{
+      const seen=new Set();
+      for(const st of sess.sets){ if(st.warmup||seen.has(st.ex)) continue; seen.add(st.ex);
+        const lp=lastPerformance(st.ex, sess.date); if(lp && st.load>lp.sets[0].load+LOAD_EPS) n++; }
+      return n; },0);
+    h+=`<div class="card"><h3>This week</h3>
+      <div class="tiles">
+        <div class="tile"><b class="num">${thisWeek.length}<small>/${planned}</small></b><span>sessions</span></div>
+        <div class="tile"><b class="num">${Math.round(setsDone)}<small>/${Math.round(setsPlan)}</small></b><span>sets</span></div>
+        <div class="tile"><b class="num">${ups}</b><span>lift${ups===1?"":"s"} up</span></div>
+      </div>
+      <details style="margin-top:10px"><summary class="mini">By muscle</summary><div style="margin-top:6px">`;
+    for(const m of MUSCLES){ const ms=S.mus[m];
+      if(NO_DIRECT.has(m) && !ms.fsWeek) continue;
+      if(!ms.fsWeek && !ms.target) continue;
+      const w=Math.min(100, 100*ms.fsWeek/Math.max(1,ms.target));
+      h+=`<div class="setline"><span class="grow">${MUSCLE_LABEL[m]}<div class="vol"><i style="width:${w}%"></i></div></span>
+        <span class="lg">${r1(ms.fsWeek)}/${r1(ms.target)}</span>
+        <span class="tag">${esc(LADDER_LABEL[ms.ladder]||ms.ladder)}</span></div>`;
+    }
+    h+=`</div></details></div>`;
   }
-  h+=`</div>`;
 
   if(S.restricted){
     h+=`<div class="card"><h3>Body numbers hidden</h3>
@@ -2463,9 +2623,8 @@ function renderLog(){
   /* Everything below is something he changes rarely or reads rarely. One
      disclosure, at the bottom, and every section inside it is collapsed too —
      three deliberate taps to alter a setting, none to log a set. */
-  h+=`<details class="more"><summary><b>More</b><span class="mini" style="margin-left:8px">settings · backup · body · how this works</span></summary>
-    <div style="margin-top:10px">${settingsHtml()}${bodyHtml()}${dataCard()}
-    <p class="mini" style="text-align:center;margin:18px 0 4px">build ${BUILD}</p></div></details>`;
+  h+=`<details class="more"><summary><b>More</b><span class="mini" style="margin-left:8px">you · data · about</span></summary>
+    <div style="margin-top:6px">${moreRows()}</div></details>`;
   $("#v-log").innerHTML=h;
   if(Photo.key) paintPhotos();
 }
@@ -2494,111 +2653,7 @@ async function paintPhotos(){
    spotter flag moved to the session screen, because it is a per-session
    fact you set standing at a rack, not a preference.
    ------------------------------------------------------------------ */
-function settingsHtml(){
-  const st=S.settings, g=st.gym;
-  let h="";
 
-  /* --- what hurts ------------------------------------------------------ */
-  const hurtNow=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0).length;
-  h+=`<div class="card"><details><summary><b>Anything hurting?</b>${hurtNow?`<span class="pill warn" style="margin-left:8px">${hurtNow} flagged</span>`:""}</summary>
-    <p class="mini" style="margin-top:8px">Mention a joint and something that sounds like pain, and I'll offer to work around it.</p>
-    <textarea id="notein" rows="2" placeholder="e.g. tweaked my left shoulder benching"></textarea>
-    <button class="btn primary wide" data-act="savenote" style="margin-top:8px">Save</button>`;
-  const flagged=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0);
-  if(flagged.length){
-    h+=`<div class="rule"></div><p class="mini">Flagged now — these fade a point a day. Tap to change.</p><div class="chips">`;
-    for(const j of flagged) h+=`<button class="chip" aria-pressed="true" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))} ${S.irr[j].sev}</button>`;
-    h+=`</div>`;
-  } else {
-    h+=`<div class="rule"></div><details><summary class="mini">Flag a joint directly</summary>
-      <div class="chips" style="margin-top:8px">${JOINTS.map(j=>`<button class="chip sm" data-act="irr" data-j="${j}">${esc(j.replace("_"," "))}</button>`).join("")}</div></details>`;
-  }
-  h+=`<label class="row" style="margin-top:10px"><input type="checkbox" style="width:auto" ${st.screening==="LIGHT_MODERATE_ONLY"?"checked":""} data-act="screentoggle">
-      <span class="sub">Take it easy — nothing closer than 3 reps from failure</span></label>
-    <button class="btn wide danger" data-act="redflag" style="margin-top:10px">Report a symptom</button>`;
-  if(S.notes.length){
-    h+=`<details style="margin-top:8px"><summary class="mini">Earlier notes (${S.notes.length})</summary>`;
-    for(const n of S.notes.slice().reverse().slice(0,15))
-      h+=`<p class="why"><b>${esc(n.d)}</b> ${esc(n.text)}</p>`;
-    h+=`</details>`;
-  }
-  h+=`</details></div>`;
-
-  /* --- what you're eating for ------------------------------------------ */
-  const PH={GAIN:"Building",MAINTAIN:"Maintaining",CUT:"Cutting"};
-  h+=`<div class="card"><details><summary><b>Right now I'm ${PH[st.phase]||""}</b></summary><div class="chips" style="margin-top:8px">
-    ${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([ph,l])=>`<button class="chip" aria-pressed="${st.phase===ph}" data-act="phase" data-p="${ph}" style="flex:1">${l}</button>`).join("")}
-    </div></details></div>`;
-
-  /* --- when you train --------------------------------------------------- */
-  const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
-  h+=`<div class="card"><details><summary><b>When I train</b><span class="mini" style="margin-left:8px">${st.days.map(d=>DAYS[d]).join(" ")}</span></summary>
-    <div class="chips" style="margin:10px 0 10px">
-    ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}" style="flex:1;padding:0 8px">${d}</button>`).join("")}</div>
-    <div class="grid2">
-      <label class="fld"><span>Minutes I usually have</span><input type="number" id="mins" value="${st.minutes}"></label>
-      <label class="fld"><span>Bodyweight (${esc(u())})</span><input type="number" id="bwset" step="0.5" value="${r1(fromKg(st.bodyKg,u()))}"></label>
-    </div>
-    <button class="btn wide" data-act="savesched">Save</button>
-    <p class="mini" style="margin-top:6px">Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day.</p>
-    <label class="row" style="margin-top:10px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
-      <span class="sub">Let a muscle go past 20 sets a week</span></label></details></div>`;
-
-  /* --- where you train -------------------------------------------------- */
-  h+=`<div class="card"><details><summary><b>My gym — ${esc(g.name)}</b></summary>
-    <p class="mini" style="margin-top:8px">Only worth touching if you change gyms.</p>
-    <div class="grid2">
-      <label class="fld"><span>Units</span><select id="unit">${["lb","kg"].map(x=>`<option ${g.unit===x?"selected":""}>${x}</option>`).join("")}</select></label>
-      <label class="fld"><span>Bar weight</span><input type="number" id="bar" step="0.5" value="${r1(fromKg(g.barKg,g.unit))}"></label>
-      <label class="fld"><span>Dumbbells min</span><input type="number" id="dbmin" value="${g.dbSegments[0].lo}"></label>
-      <label class="fld"><span>Dumbbells max</span><input type="number" id="dbmax" value="${g.dbSegments[g.dbSegments.length-1].hi}"></label>
-      <label class="fld"><span>Dumbbell step</span><input type="number" id="dbstep" value="${g.dbSegments[0].step}"></label>
-      <label class="fld"><span>Cable / stack step</span><input type="number" id="stack" value="${g.stackStep}"></label>
-    </div>
-    <label class="fld"><span>Smallest plate pair</span><input type="number" id="minplate" step="0.5" value="${Math.min(...g.plates.map(p=>p.w))}"></label>
-    <button class="btn wide" data-act="savegym">Save gym</button></details></div>`;
-
-  const hid = (st.dismissed||[]);
-  if(hid.length) h+=`<div class="card tight"><div class="row">
-    <div class="grow"><b>${hid.length} hidden note${hid.length>1?"s":""}</b></div>
-    <button class="btn" data-act="unhide">Show again</button></div></div>`;
-  return h;
-}
-
-/* Backup and the honesty block live with the DATA, not with the person.
-   Settings is for facts about him that change; these are neither. */
-function dataCard(){
-  const st=S.settings;
-  let h=`<div class="card"><details ${Sync.configured()?"":"open"}><summary><b>Backup</b> — ${Sync.configured()?esc(Sync.state):"not connected"}</summary>
-    <p class="mini" style="margin-top:8px">Plain text in a private GitHub repo, one file per training day. <code>git clone</code> gets it all back with no app.</p>
-    <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
-    <label class="fld"><span>Token — Contents: read and write, that repo only, 90-day expiry</span>
-      <input type="password" id="tok" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${Sync.token?"•••••••• sealed on this device":"github_pat_..."}"></label>
-    <button class="btn primary wide" data-act="savesync">Connect</button>
-    <p class="mini" style="margin-top:8px">${esc(Sync.state)}${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} waiting`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
-    <div class="row" style="margin-top:8px">
-      <button class="btn grow" data-act="syncnow">Back up now</button>
-      <button class="btn grow" data-act="export">Export to a file</button>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <button class="btn grow" data-act="import">Import a file</button>
-      <button class="btn grow" data-act="restore">Restore from GitHub</button>
-    </div>
-    <p class="mini" style="margin-top:6px">Restore merges the repo back in. Nothing local is deleted.</p>
-    </details></div>`;
-
-  h+=`<div class="card"><details><summary><b>What these numbers are, and what they aren't</b></summary><div style="margin-top:8px">
-    <p class="sub">The training weights come from a small literature on what strangers rate as attractive in photographs and CGI models of men's bodies. That isn't the same as what happens between two people. Where researchers measured actual outcomes instead of ratings, the association is about <b>r = 0.08 to 0.13</b> — half a percent to two percent of the variation. Real, small, and correlational: nobody has ever measured the same man before and after a training block and rated him twice.</p>
-    <p class="sub"><b>The per-muscle weights are the weakest part of this app.</b> One study has ever asked women about individual muscle groups. Thirteen of its fourteen muscles sit inside a one-point band on a seven-point scale, while raters disagreed with each other by more than that whole band. So this ships four tiers, not sixteen numbers. Where you see 2.0 beside 1.25, that gap is a judgment about recovery cost — not a measured preference.</p>
-    <p class="sub"><b>Body fat is an estimate.</b> Whatever your scale says, the truth is probably within three to five points of it, so nothing here triggers off a body-fat percentage. Everything triggers off waist and scale weight.</p>
-    <p class="sub"><b>The body is one input.</b> This research removes faces by design, so nobody has measured what share physique carries. Height, face and voice all appear in it and none are things a training plan touches.</p>
-    <p class="sub"><b>Always on, and not switchable:</b> no body numbers on the home screen, a hard stop after 12 straight weeks in a deficit, a 0.8%-a-week rate cap, no physique imagery, no streaks, 12-week reviews.</p>
-    <div class="rule"></div>
-    <p class="why"><b>Engineering guesses, labelled as such:</b> the 9-sets-per-session cap (absent from the peer-reviewed literature), the 14- and 28-day layoff bands (no trial), the 2–10% load steps (committee consensus), the two fatigue priors, and the 2.5 cm waist tripwire (calibrated to tape noise).</p>
-    <p class="why"><b>Deleted as unverifiable:</b> a 13–14% body-fat optimum, a 1.57 shoulder-to-waist plateau, a 0.77 waist-to-chest target, "1.15 cm of waist per kg". None survived source-checking; none are in the code.</p>
-    </div></details></div>`;
-  return h;
-}
 
 
 /* ========================= SHEETS / PROMPTS ======================== */
@@ -2634,7 +2689,7 @@ function confirmSheet(title, body, yes){
         <button class="btn wide" data-act="confirm-no">Cancel</button></div>`);
   });
 }
-function closeSheet(){ const s=$("#sheet"); s.className="hide"; s.innerHTML=""; }
+function closeSheet(){ const s=$("#sheet"); s.className="hide"; s.innerHTML=""; MORE_OPEN=null; }
 let RIR_CB=null, END_CB=null, EXTRA_CB=null;
 function askExtra(cb){
   EXTRA_CB=cb;
@@ -2696,6 +2751,7 @@ async function handle(a,t,ev){
       <button class="btn wide" data-act="closesheet" style="margin-top:10px">Done</button>`);
     return;
   }
+  case "more": return openSection(t.dataset.k);
   case "openex": OPEN_EX = (OPEN_EX===t.dataset.ex) ? null : t.dataset.ex; return render();
   case "busy": {
     const exId=t.dataset.ex, m=t.dataset.m;
