@@ -1,7 +1,11 @@
 # Overload — working rules
 
 Single-file app: `index.html`. Vanilla JS, zero dependencies, no build step.
-Deployed by Cloudflare Pages on every push to `main` → https://overload-o3a.pages.dev
+Deployed on every push to `main`, twice:
+  - GitHub Pages → https://meni-gottesman.github.io/overload/  (his preferred URL)
+  - Cloudflare Pages → https://overload-o3a.pages.dev  (isolated origin; `_headers` applies here only)
+Both serve the same commit. IndexedDB is per-origin, so they hold separate local logs
+until backup is connected. GitHub Pages ignores `_headers` and caches for 10 minutes.
 Tests: `node test.js` (93 assertions) **and** `node test-sync.js` (23 assertions, runs the
 real Sync code against a mock GitHub and an in-memory IndexedDB). Both must be green.
 

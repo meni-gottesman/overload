@@ -8,7 +8,13 @@ the first open of each new local day it reads that and writes the next session:
 loads your gym can physically make, sets it can justify, and **one sentence per
 change** explaining which observation caused it.
 
-**Live:** https://overload-o3a.pages.dev
+**Live:** https://meni-gottesman.github.io/overload/ (GitHub Pages) and
+https://overload-o3a.pages.dev (Cloudflare Pages) — the same repo, deployed twice.
+
+Use one. Browser storage is per-origin, so a set logged at one URL is not on the
+other until backup is connected and restored. The Cloudflare origin is isolated
+from every other page under `meni-gottesman.github.io`; the GitHub Pages one is
+not, which is the only reason it was not the first choice.
 
 ## What makes it different from a spreadsheet
 
