@@ -52,6 +52,9 @@ Do not edit the fixture to make it pass — the fixture is the contract.
 - **Every plan change emits a sentence.** `emit()` throws without a rule id and a sentence.
   This is deliberate. Do not soften it into a warning.
 - **Loads are members of `loadableSet()`.** Never prescribe a weight the gym cannot make.
+- **Progression is one rung.** 5 lb on the bar, 5 lb a hand, one pin on the stack. How far
+  he beat the target decides whether to move, never how far. Do not reintroduce percentage
+  steps that skip rungs.
 - **No `alert()` or `confirm()`.** A native modal blocks the whole page on a phone.
 - **No external subresource.** No CDN, no webfont, no analytics. The page holds a token with
   write access to a private repo; a third-party script would run with full authority over it.
@@ -70,6 +73,9 @@ Do not edit the fixture to make it pass — the fixture is the contract.
     test.js                 replays the planner in a VM, asserts the invariants
     test-sync.js            drives Sync against a mock GitHub + fake IndexedDB
     fixtures/v1-log.json    frozen v1 event shapes — the compatibility contract
+    img/<exercise>_{0,1}.jpg  start/finish photos per lift, from free-exercise-db
+                            (yuhonas, Unlicense / public domain), resized to 560 px.
+                            Committed here so img-src stays 'self' — never hotlink.
     data/                   staging for the overload-data repo (not committed here)
     .claude/launch.json     local preview on :8931, serving /tmp/ovl-serve
 

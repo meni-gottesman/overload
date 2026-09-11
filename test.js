@@ -43,7 +43,7 @@ ok("barbell set is strictly ascending", ctx.BB.every((v,i)=>i===0||v>ctx.BB[i-1]
 ok("barbell can make 135 lb", ctx.BB.some(v=>Math.abs(ctx.LB2(v)-135)<0.01));
 ok("barbell CANNOT make 46 lb (no 0.5 lb plates)", !ctx.BB.some(v=>Math.abs(ctx.LB2(v)-46)<0.01));
 ok("dumbbells step by 5 lb", Math.abs(ctx.LB2(ctx.DB[1])-ctx.LB2(ctx.DB[0])-5)<0.01);
-ok("cable stack steps by 10 lb", Math.abs(ctx.LB2(ctx.CB[1])-ctx.LB2(ctx.CB[0])-10)<0.01);
+ok("cable stack steps by 5 lb (the add-on plate)", Math.abs(ctx.LB2(ctx.CB[1])-ctx.LB2(ctx.CB[0])-5)<0.01, ctx.LB2(ctx.CB[1])-ctx.LB2(ctx.CB[0]));
 
 console.log("\nLOAD STEPPING — never fabricate a weight the rack can't make");
 run(`
@@ -79,7 +79,11 @@ ok("load unchanged inside the deadband", ctx.DB_LOAD===ctx.L0);
 
 console.log("\nPRG-06 — increment-stall: widen the band instead of faking a jump");
 run(`
-  E2=fresh("cable_lat_raise", toKg(30,"lb"));   // next stack step is +10 lb = 33%, way over the 5% cap
+  // a coarse stack: 10 lb pins, no add-on plate. One rung is +33% at 30 lb and
+  // bigger than the 5 lb always-OK step, so the cap has to decide.
+  E2=fresh("cable_lat_raise", toKg(30,"lb"));
+  S.settings.gym.microplates=false;
+  E2.load=nearestLoad(loadableSet(LIBX["cable_lat_raise"],S.settings.gym), toKg(30,"lb"));
   E2.target=E2.hi;                               // already at the top of the band
   HI0=E2.hiEff;
   ingestSession(sess("cable_lat_raise", E2.hi, 3));
@@ -92,6 +96,8 @@ ok("band ceiling widened by a rep instead (PRG-06)", ctx.HI1===ctx.HI0+1, `${ctx
 console.log("\nPRG-07 — reps may NEVER exceed the band ceiling a third time");
 run(`
   E3=fresh("cable_lat_raise", toKg(30,"lb"));
+  S.settings.gym.microplates=false;
+  E3.load=nearestLoad(loadableSet(LIBX["cable_lat_raise"],S.settings.gym), toKg(30,"lb"));
   START=E3.load;
   const over=E3.hiEff+4;
   ingestSession(sess("cable_lat_raise", over, 3));   // exposure 1 over the ceiling
@@ -102,6 +108,18 @@ run(`
 ok("first overshoot widens the band, load unchanged", ctx.AFTER1===ctx.START, `${ctx.LB2(ctx.START)} -> ${ctx.LB2(ctx.AFTER1)} lb`);
 ok("second consecutive overshoot FORCES the load jump", ctx.AFTER2>ctx.START, `${ctx.LB2(ctx.START)} -> ${ctx.LB2(ctx.AFTER2)} lb`);
 ok("reps reset to the bottom of the band after a forced jump", ctx.TGT2===ctx.E3.lo, ctx.TGT2);
+
+console.log("\nOne rung — progression moves exactly 5 lb, never a percentage");
+run(`
+  E5=fresh("bb_bench", toKg(185,"lb")); const B5=E5.load;
+  ingestSession(sess("bb_bench", E5.target+6, 3));        // crushed it
+  UP_LB = Math.round(fromKg(E5.load,"lb")) - Math.round(fromKg(B5,"lb"));
+  E6=fresh("cable_lat_raise", toKg(30,"lb")); const B6=E6.load;
+  ingestSession(sess("cable_lat_raise", E6.target+4, 3));  // light lift, big overshoot
+  UP_CABLE_LB = Math.round(fromKg(E6.load,"lb")) - Math.round(fromKg(B6,"lb"));
+`);
+ok("crushing a barbell target moves it exactly one 5 lb step", ctx.UP_LB===5, "+"+ctx.UP_LB+" lb");
+ok("a light cable lift also moves exactly 5 lb, even at 17%", ctx.UP_CABLE_LB===5, "+"+ctx.UP_CABLE_LB+" lb");
 
 console.log("\nPRG-03 — a down-correction needs confirmation (asymmetric)");
 run(`
