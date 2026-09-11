@@ -1,7 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-R55H73afgSyaAV5zTXGGOOwmfpAMD0BZM24NQ/BjhDc='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-P2n6ynmj5cJ/m+ePGetI0XAhwNq44pw2y0GDlb2Ba6Q='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#f3f4f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -117,6 +117,8 @@ nav button[aria-current="true"] .g{color:var(--accent)}
 .row .grow{flex:1;min-width:0}
 .spine{border-left:0}   /* the left rail was decoration; state is carried by the live surface and the ✓ */
 .spine.ok{}
+.thumb{appearance:none;border:0;padding:0;background:var(--sunken);border-radius:12px;width:64px;height:64px;flex:0 0 64px;overflow:hidden;cursor:pointer;align-self:flex-start}
+.thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .lede{display:flex;align-items:baseline;gap:10px;padding:6px 2px 12px;color:var(--ink3);font-size:var(--t-sm)}
 .lede b{color:var(--ink);font-family:var(--mono);font-weight:600;font-size:var(--t-lg);font-variant-numeric:tabular-nums}
 .lede .grow{flex:1}
@@ -252,7 +254,7 @@ details[open] summary{margin-bottom:4px}
 
 <nav id="tabs" class="hide">
   <button data-v="session" aria-current="true"><span class="g">◆</span>Today</button>
-  <button data-v="log"><span class="g">▤</span>Progress</button>
+  <button data-v="log"><span class="g">▤</span>Log</button>
   <button data-v="setup"><span class="g">⚙</span>Settings</button>
 </nav>
 
@@ -276,7 +278,7 @@ details[open] summary{margin-bottom:4px}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-11 15:54";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-11 15:57";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -2224,7 +2226,7 @@ function renderSession(){
     const last = lastPerformance(s.ex, date);
     const alts = complete ? [] : alternativesFor(s.ex, s.muscle, p.slots.map(x=>x.ex));
     h+=`<div class="card live">
-      <div class="row"><div class="grow">
+      <div class="row">${HOWTO[s.ex]?`<button class="thumb" data-act="howto" data-ex="${s.ex}" aria-label="How to do ${esc(s.name)}"><img src="img/${s.ex}_0.jpg" alt=""></button>`:""}<div class="grow">
         <h3>${esc(s.name)}</h3>
         <div class="meta"><span>${esc(MUSCLE_LABEL[s.muscle])}</span><span class="sep">·</span>
           <span class="num">${s.sets} × ${s.reps}</span><span class="sep">·</span>
@@ -2258,7 +2260,7 @@ function renderSession(){
       <div class="row" style="margin-bottom:8px">
         <select data-load="${s.ex}" style="flex:1">${
           s.needsSeed && !done.length
-          ? `<option value="">Pick a weight you could do about 15 times</option>`+s.loadSet.map(v=>`<option value="${v}">${esc(fmtL(e,v))}</option>`).join("")
+          ? `<option value="">Pick a weight · ~15-rep</option>`+s.loadSet.map(v=>`<option value="${v}">${esc(fmtL(e,v))}</option>`).join("")
           : s.loadSet.map(v=>`<option value="${v}" ${Math.abs(v-(cur||0))<1e-6?"selected":""}>${esc(fmtL(e,v))}</option>`).join("")
         }</select>
         ${Rest.ex===s.ex && Rest.left()>0 ? `<span class="pill" id="resttimer">Rest</span>` : ""}
@@ -2268,7 +2270,6 @@ function renderSession(){
         <button class="chip sm" data-act="warmup" data-ex="${s.ex}">Warmup</button>
         <button class="chip sm" data-act="busy" data-ex="${s.ex}" data-m="${s.muscle}">Taken</button>
         <button class="chip sm" data-act="addset" data-ex="${s.ex}" data-n="${s.sets+1}">+ set</button>
-        ${HOWTO[s.ex]?`<button class="chip sm" data-act="howto" data-ex="${s.ex}">How</button>`:""}
       </div>
       <div class="row">
         <button class="step" data-act="rep-" data-ex="${s.ex}" aria-label="one fewer rep">−</button>
@@ -2287,7 +2288,9 @@ function renderSession(){
 
 
   closeList();
-  h += coachCard(p);
+  // The only notes that belong on the session are the ones that reshaped it today.
+  const loudNotes=(p.notes||[]).filter(n=>["SAF-05","CAP-01","MIS-01","OVERCONSTRAINED","PRG-10"].includes(n.rule));
+  for(const n of loudNotes) h+=`<p class="why">${esc(n.text)}</p>`;
   h += `<div class="dock"><button class="btn primary wide big" data-act="endsession">Finish session</button></div>`;
   $("#v-session").innerHTML=h;
 }
@@ -2349,17 +2352,36 @@ function renderLog(){
   let h=syncBanner();
   const exIds=[...new Set(S.events.filter(e=>e.type==="set" && !S.voided.has(e.id)).map(e=>e.payload.ex))];
 
-  if(exIds.length){
+  /* The log itself, newest first. This is what "come back to it" means: every
+     session, every set, as it was done. The most recent is open; the rest are
+     a line each. */
+  const sessions=S.sessions.slice().reverse();
+  if(sessions.length){
+    h+=`<div class="card"><h3>Sessions</h3>`;
+    sessions.slice(0,60).forEach((sess,i)=>{
+      const byEx={}; for(const st of sess.sets){ if(st.warmup) continue; (byEx[st.ex]=byEx[st.ex]||[]).push(st); }
+      const lifts=Object.keys(byEx);
+      const d=new Date(sess.date+"T12:00:00");
+      const label=d.toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+      h+=`<details ${i===0?"open":""}><summary><b>${esc(label)}</b><span class="mini" style="margin-left:8px">${lifts.length} lift${lifts.length===1?"":"s"} · ${sess.sets.filter(x=>!x.warmup).length} sets</span></summary>`;
+      for(const ex of lifts){ const e=LIBX[ex]; if(!e) continue; const sets=byEx[ex];
+        h+=`<div class="setline"><span class="grow" style="font-family:var(--serif);font-weight:600">${esc(e.name)}</span>
+          <span class="lg">${esc(fmtL(e,sets[0].load))} × ${sets.map(x=>x.reps).join(", ")}</span></div>`;
+      }
+      h+=`</details>`;
+    });
+    h+=`</div>`;
+  }
+
+  if(exIds.some(id=>S.ex[id]&&S.ex[id].load!=null)){
     h+=`<div class="card"><h3>Working weights</h3>
   
       <div class="scroll-x"><table>
       <tr><th>Lift</th><th style="text-align:right">Load</th><th style="text-align:right">Reps</th><th style="text-align:right">Sessions</th></tr>`;
-    for(const id of exIds){ const e=LIBX[id], es=S.ex[id]; if(!e||!es) continue;
+    for(const id of exIds){ const e=LIBX[id], es=S.ex[id]; if(!e||!es||es.load==null) continue;   // measured tomorrow
       h+=`<tr><td>${esc(e.name)}</td><td class="n">${esc(fmtL(e,es.load))}</td>
       <td class="n">${es.target}</td><td class="n">${es.sessions}</td></tr>`; }
     h+=`</table></div></div>`;
-  } else {
-    h+=`<div class="empty">Log a session and this fills up.</div>`;
   }
 
   h+=`<div class="card"><h3>This week</h3>
