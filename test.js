@@ -608,17 +608,17 @@ run(`
   S.bw=[{d:"2026-06-20",kg:81.6}]; S.waist=[]; S.notes=[{d:"2026-06-20",text:"ok"}];
   S.diffs=[{date:"2026-06-19",list:[{rule:"PRG-02",sentence:"test",field:"load",old:1,new:2}]}];
   RENDER_ERR = [];
-  for(const [name,fn] of [["session",renderSession],["progress",renderLog],["settings",renderSetup]]){
+  for(const [name,fn] of [["session",renderSession],["log",renderLog],["settings",settingsHtml],["body",bodyHtml]]){
     try{ fn(); }catch(e){ RENDER_ERR.push(name+": "+e.message); }
   }
   // and again with data that exercises the other branches
   S.mus.lats.fsWeek=6; S.mus.lats.ladder="DELOAD"; S.restricted=false;
   S.irr.shoulder={sev:7,at:"2026-06-20",quality:"dull"};
-  for(const [name,fn] of [["session+flag",renderSession],["progress+vol",renderLog],["settings+flag",renderSetup]]){
+  for(const [name,fn] of [["session+flag",renderSession],["log+vol",renderLog],["settings+flag",settingsHtml]]){
     try{ fn(); }catch(e){ RENDER_ERR.push(name+": "+e.message); }
   }
   S.restricted=true;
-  for(const [name,fn] of [["session restricted",renderSession],["progress restricted",renderLog]]){
+  for(const [name,fn] of [["session restricted",renderSession],["log restricted",renderLog]]){
     try{ fn(); }catch(e){ RENDER_ERR.push(name+": "+e.message); }
   }
   RENDER_ERR = RENDER_ERR.join(" || ");

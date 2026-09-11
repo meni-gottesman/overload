@@ -1,7 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-P2n6ynmj5cJ/m+ePGetI0XAhwNq44pw2y0GDlb2Ba6Q='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-KfVZllwEKh1622K3UaSeMKgWMht5D4fK2GFAjLhRWMs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#f3f4f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -89,7 +89,7 @@ nav{
   position:fixed;left:0;right:0;bottom:0;z-index:50;
   background:var(--surface);border-top:1px solid var(--line);
   padding-bottom:env(safe-area-inset-bottom);
-  display:grid;grid-template-columns:repeat(3,1fr);
+  display:grid;grid-template-columns:repeat(2,1fr);
 }
 nav button{
   appearance:none;border:0;background:none;color:var(--ink3);
@@ -234,6 +234,10 @@ details[open] summary{margin-bottom:4px}
 .steps{padding-left:20px;margin:6px 0 0;font-size:var(--t-sm);color:var(--ink2);line-height:1.5}
 .steps li{margin:0 0 6px}
 .empty{text-align:center;color:var(--ink3);padding:34px 12px;font-size:var(--t-sm)}
+details.more{margin:18px 0 0;padding:0 4px}
+details.more>summary{color:var(--ink3);font-size:var(--t-sm)}
+details.more>summary b{color:var(--ink2);font-weight:600}
+details.more[open]>summary{color:var(--ink)}
 .bars{display:flex;align-items:flex-end;gap:3px;height:44px;margin:8px 0 4px}
 .bars i{flex:1;background:var(--accent);border-radius:2px 2px 0 0;min-height:2px;opacity:.75}
 .vol{height:5px;background:var(--sunken);border-radius:3px;margin-top:5px;overflow:hidden}
@@ -248,14 +252,12 @@ details[open] summary{margin-bottom:4px}
   <div id="boot" class="empty">Loading…</div>
 
   <section class="view" id="v-session" aria-label="Today's session"></section>
-  <section class="view" id="v-log"   aria-label="Progress"></section>
-  <section class="view" id="v-setup" aria-label="Settings"></section>
+  <section class="view" id="v-log"   aria-label="Log"></section>
 </main>
 
 <nav id="tabs" class="hide">
   <button data-v="session" aria-current="true"><span class="g">◆</span>Today</button>
   <button data-v="log"><span class="g">▤</span>Log</button>
-  <button data-v="setup"><span class="g">⚙</span>Settings</button>
 </nav>
 
 <div id="sheet" class="hide"></div>
@@ -278,7 +280,7 @@ details[open] summary{margin-bottom:4px}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-11 15:57";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-11 16:00";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -1755,7 +1757,7 @@ const Sync = {
     /* Never re-render mid-session from a background flush: it rebuilds the
        load <select> and the rep stepper under the user's thumb, fifteen
        seconds after every set. Only the Settings screen shows sync state. */
-    this.state="syncing"; if(VIEW==="setup") render();
+    this.state="syncing"; if(VIEW==="log") render();
     /* Snapshot the batch. Clearing the whole queue after the round trip threw
        away everything logged DURING the upload, while reporting success. */
     const batch = this.pending.slice();
@@ -1782,7 +1784,7 @@ const Sync = {
       this.lastErr = String(err.message||err);
       await kvPut("gh_pending", this.pending);
     }
-    if(VIEW==="setup") render();
+    if(VIEW==="log") render();
   },
   async listDir(path){
     const r = await this.api(`/repos/${this.owner}/${this.repo}/contents/${path}`);
@@ -2129,7 +2131,7 @@ function render(){
   $("#topdate").textContent = new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
   $("#v-"+VIEW).classList.add("on");
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current", b.dataset.v===VIEW?"true":"false"));
-  ({session:renderSession, log:renderLog, setup:renderSetup})[VIEW]();
+  ({session:renderSession, log:renderLog})[VIEW]();
 }
 function go(v){ VIEW=v; render(); window.scrollTo(0,0); }
 
@@ -2348,6 +2350,44 @@ function coachCard(p){
    ------------------------------------------------------------------ */
 const LADDER_LABEL = { RAMP:"easing in", BUILD:"adding", HOLD:"steady",
   PROBE:"testing fewer", DELOAD:"recovering", MAINTAIN:"holding" };
+function bodyHtml(){
+  if(S.restricted) return "";   // hidden while the frequency cap is on
+  let h="";
+  const w=waistStats();
+  h+=`<div class="card"><details><summary><b>Waist</b>${w&&w.median28!=null?` — ${r1(w.median28)} cm`:""}</summary>
+    <p class="mini" style="margin-top:8px">Mean of three, same site, same time of day. Optional — but it is the only measurement here that moves fast enough to mean anything.</p>
+    <div class="row"><input type="number" step="0.1" inputmode="decimal" id="w1" placeholder="1">
+      <input type="number" step="0.1" inputmode="decimal" id="w2" placeholder="2">
+      <input type="number" step="0.1" inputmode="decimal" id="w3" placeholder="3">
+      <button class="btn primary" data-act="logwaist">Log</button></div>`;
+  if(w && w.median28!=null && w.min90!=null){
+    const d=w.median28-w.min90;
+    h+= Math.abs(d) < K.WAIST_MDC_CM
+      ? `<p class="why"><b>No real change.</b> Within ${K.WAIST_MDC_CM} cm of your 90-day low, which is the smallest gap a tape can resolve.</p>`
+      : `<p class="why"><b>${d>0?"+":""}${r1(d)} cm</b> against your 90-day low.</p>`;
+  }
+  h+=`</details></div>`;
+
+  const photoBytes = S.photos.reduce((a,p)=>a+(p.bytes||0),0);
+  h+=`<div class="card"><details><summary><b>Photos</b>${S.photos.length?` — ${S.photos.length}, ${photoBytes>1048576?(photoBytes/1048576).toFixed(1)+" MB":Math.round(photoBytes/1024)+" KB"} total`:""}</summary>
+    <p class="mini" style="margin-top:8px">Compressed to about 150 KB and encrypted on this device before anything is uploaded. Same pose, same light, same time of day.</p>`;
+  if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
+    <button class="btn" data-act="unlockphotos">Unlock</button></div>
+    <p class="mini" style="margin-top:8px">Keep this in your password manager. Lose it and the photos are gone — the training log is deliberately not encrypted so that can never happen to your actual data.</p>`;
+  else h+=`<button class="btn wide" data-act="addphoto">Add today's photo</button>
+    <div class="ph" id="phgrid" style="margin-top:10px"></div>`;
+  h+=`</details></div>`;
+
+  const all=S.diffs.slice().reverse().flatMap(g=>g.list.map(d=>({...d,date:g.date})));
+  h+=`<div class="card"><details><summary><b>Every decision it has made</b>${all.length?` — ${all.length}`:""}</summary>
+  <p class="mini" style="margin-top:8px">Nothing can change without a sentence here. A change with no reason attached throws rather than shipping quietly.</p>`;
+  if(!all.length) h+=`<p class="sub">Nothing yet.</p>`;
+  for(const d of all.slice(0,60)) h+=`<p class="why"><b>${esc(d.date)}</b> ${esc(d.sentence)} <span class="mini">${esc(d.rule)}</span></p>`;
+  h+=`<p class="mini" style="margin-top:10px">Reviewed every 12 weeks, not weekly: eight weeks of direct shoulder work buys about a millimetre, and a tape can't resolve less than ${K.WAIST_MDC_CM} cm. A weekly number would be noise, and noise you check daily starts to feel like failure.</p>`;
+  h+=`</details></div>`;
+  return h;
+}
+
 function renderLog(){
   let h=syncBanner();
   const exIds=[...new Set(S.events.filter(e=>e.type==="set" && !S.voided.has(e.id)).map(e=>e.payload.ex))];
@@ -2418,41 +2458,14 @@ function renderLog(){
     }
     h+=`</div>`;
 
-    const w=waistStats();
-    h+=`<div class="card"><details><summary><b>Waist</b>${w&&w.median28!=null?` — ${r1(w.median28)} cm`:""}</summary>
-      <p class="mini" style="margin-top:8px">Mean of three, same site, same time of day. Optional — but it is the only measurement here that moves fast enough to mean anything.</p>
-      <div class="row"><input type="number" step="0.1" inputmode="decimal" id="w1" placeholder="1">
-        <input type="number" step="0.1" inputmode="decimal" id="w2" placeholder="2">
-        <input type="number" step="0.1" inputmode="decimal" id="w3" placeholder="3">
-        <button class="btn primary" data-act="logwaist">Log</button></div>`;
-    if(w && w.median28!=null && w.min90!=null){
-      const d=w.median28-w.min90;
-      h+= Math.abs(d) < K.WAIST_MDC_CM
-        ? `<p class="why"><b>No real change.</b> Within ${K.WAIST_MDC_CM} cm of your 90-day low, which is the smallest gap a tape can resolve.</p>`
-        : `<p class="why"><b>${d>0?"+":""}${r1(d)} cm</b> against your 90-day low.</p>`;
-    }
-    h+=`</details></div>`;
-
-    const photoBytes = S.photos.reduce((a,p)=>a+(p.bytes||0),0);
-    h+=`<div class="card"><details><summary><b>Photos</b>${S.photos.length?` — ${S.photos.length}, ${photoBytes>1048576?(photoBytes/1048576).toFixed(1)+" MB":Math.round(photoBytes/1024)+" KB"} total`:""}</summary>
-      <p class="mini" style="margin-top:8px">Compressed to about 150 KB and encrypted on this device before anything is uploaded. Same pose, same light, same time of day.</p>`;
-    if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
-      <button class="btn" data-act="unlockphotos">Unlock</button></div>
-      <p class="mini" style="margin-top:8px">Keep this in your password manager. Lose it and the photos are gone — the training log is deliberately not encrypted so that can never happen to your actual data.</p>`;
-    else h+=`<button class="btn wide" data-act="addphoto">Add today's photo</button>
-      <div class="ph" id="phgrid" style="margin-top:10px"></div>`;
-    h+=`</details></div>`;
   }
 
-  const all=S.diffs.slice().reverse().flatMap(g=>g.list.map(d=>({...d,date:g.date})));
-  h+=`<div class="card"><details><summary><b>Every decision it has made</b>${all.length?` — ${all.length}`:""}</summary>
-    <p class="mini" style="margin-top:8px">Nothing can change without a sentence here. A change with no reason attached throws rather than shipping quietly.</p>`;
-  if(!all.length) h+=`<p class="sub">Nothing yet.</p>`;
-  for(const d of all.slice(0,60)) h+=`<p class="why"><b>${esc(d.date)}</b> ${esc(d.sentence)} <span class="mini">${esc(d.rule)}</span></p>`;
-  h+=`<p class="mini" style="margin-top:10px">Reviewed every 12 weeks, not weekly: eight weeks of direct shoulder work buys about a millimetre, and a tape can't resolve less than ${K.WAIST_MDC_CM} cm. A weekly number would be noise, and noise you check daily starts to feel like failure.</p>`;
-  h+=`</details></div>`;
-
-  h += dataCard();
+  /* Everything below is something he changes rarely or reads rarely. One
+     disclosure, at the bottom, and every section inside it is collapsed too —
+     three deliberate taps to alter a setting, none to log a set. */
+  h+=`<details class="more"><summary><b>More</b><span class="mini" style="margin-left:8px">settings · backup · body · how this works</span></summary>
+    <div style="margin-top:10px">${settingsHtml()}${bodyHtml()}${dataCard()}
+    <p class="mini" style="text-align:center;margin:18px 0 4px">build ${BUILD}</p></div></details>`;
   $("#v-log").innerHTML=h;
   if(Photo.key) paintPhotos();
 }
@@ -2481,13 +2494,14 @@ async function paintPhotos(){
    spotter flag moved to the session screen, because it is a per-session
    fact you set standing at a rack, not a preference.
    ------------------------------------------------------------------ */
-function renderSetup(){
+function settingsHtml(){
   const st=S.settings, g=st.gym;
   let h="";
 
   /* --- what hurts ------------------------------------------------------ */
-  h+=`<div class="card"><h3>Anything hurting?</h3>
-    <p class="mini">Mention a joint and something that sounds like pain, and I'll offer to work around it.</p>
+  const hurtNow=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0).length;
+  h+=`<div class="card"><details><summary><b>Anything hurting?</b>${hurtNow?`<span class="pill warn" style="margin-left:8px">${hurtNow} flagged</span>`:""}</summary>
+    <p class="mini" style="margin-top:8px">Mention a joint and something that sounds like pain, and I'll offer to work around it.</p>
     <textarea id="notein" rows="2" placeholder="e.g. tweaked my left shoulder benching"></textarea>
     <button class="btn primary wide" data-act="savenote" style="margin-top:8px">Save</button>`;
   const flagged=JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>0);
@@ -2508,16 +2522,18 @@ function renderSetup(){
       h+=`<p class="why"><b>${esc(n.d)}</b> ${esc(n.text)}</p>`;
     h+=`</details>`;
   }
-  h+=`</div>`;
+  h+=`</details></div>`;
 
   /* --- what you're eating for ------------------------------------------ */
-  h+=`<div class="card"><h3>Right now I'm</h3><div class="chips">
+  const PH={GAIN:"Building",MAINTAIN:"Maintaining",CUT:"Cutting"};
+  h+=`<div class="card"><details><summary><b>Right now I'm ${PH[st.phase]||""}</b></summary><div class="chips" style="margin-top:8px">
     ${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([ph,l])=>`<button class="chip" aria-pressed="${st.phase===ph}" data-act="phase" data-p="${ph}" style="flex:1">${l}</button>`).join("")}
-    </div></div>`;
+    </div></details></div>`;
 
   /* --- when you train --------------------------------------------------- */
-  h+=`<div class="card"><h3>When I train</h3>
-    <div class="chips" style="margin:6px 0 10px">
+  const DAYS=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+  h+=`<div class="card"><details><summary><b>When I train</b><span class="mini" style="margin-left:8px">${st.days.map(d=>DAYS[d]).join(" ")}</span></summary>
+    <div class="chips" style="margin:10px 0 10px">
     ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}" style="flex:1;padding:0 8px">${d}</button>`).join("")}</div>
     <div class="grid2">
       <label class="fld"><span>Minutes I usually have</span><input type="number" id="mins" value="${st.minutes}"></label>
@@ -2526,7 +2542,7 @@ function renderSetup(){
     <button class="btn wide" data-act="savesched">Save</button>
     <p class="mini" style="margin-top:6px">Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day.</p>
     <label class="row" style="margin-top:10px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol">
-      <span class="sub">Let a muscle go past 20 sets a week</span></label></div>`;
+      <span class="sub">Let a muscle go past 20 sets a week</span></label></details></div>`;
 
   /* --- where you train -------------------------------------------------- */
   h+=`<div class="card"><details><summary><b>My gym — ${esc(g.name)}</b></summary>
@@ -2546,9 +2562,7 @@ function renderSetup(){
   if(hid.length) h+=`<div class="card tight"><div class="row">
     <div class="grow"><b>${hid.length} hidden note${hid.length>1?"s":""}</b></div>
     <button class="btn" data-act="unhide">Show again</button></div></div>`;
-
-  h+=`<p class="mini" style="text-align:center;margin-top:18px">build ${BUILD}</p>`;
-  $("#v-setup").innerHTML=h;
+  return h;
 }
 
 /* Backup and the honesty block live with the DATA, not with the person.
