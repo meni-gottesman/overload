@@ -222,7 +222,7 @@ td.n{font-family:var(--mono);text-align:right}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-10 14:14";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-10 20:51";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -1760,14 +1760,46 @@ const Photo = {
   /* Re-encode through a canvas at <=1200px. This drops the EXIF block
      (including GPS) because it re-encodes from pixel data, and keeps a
      year of weekly photos near 15 MB. */
+  /* Decode with EXIF orientation honoured — without it a portrait shot from
+     an iPhone comes out sideways. Falls back to an <img> element, which Safari
+     uses to decode HEIC natively when createImageBitmap will not. */
+  async decode(file){
+    try{ return await createImageBitmap(file, {imageOrientation:"from-image"}); }
+    catch(e){
+      const url=URL.createObjectURL(file);
+      try{
+        const img=await new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=url; });
+        return img;
+      } finally { setTimeout(()=>URL.revokeObjectURL(url), 1000); }
+    }
+  },
+  /* Compress to a BUDGET, not a guess. Re-encode through a canvas (which
+     drops EXIF, including GPS) and walk quality down, then dimensions, until
+     the file is under target. A 4 MB phone photo lands around 120-180 KB;
+     a year of weekly photos is ~8 MB. Nothing in this stack bills for
+     storage, but a repo that swells past GitHub's ~1 GB guidance is a repo
+     that becomes painful to clone, and clone is the whole restore story. */
+  PHOTO_TARGET: 180*1024,
+  PHOTO_HARD_CAP: 320*1024,
   async downscale(file){
-    const bmp = await createImageBitmap(file);
-    const scale = Math.min(1, 1200/Math.max(bmp.width,bmp.height));
-    const c = document.createElement("canvas");
-    c.width = Math.round(bmp.width*scale); c.height = Math.round(bmp.height*scale);
-    c.getContext("2d").drawImage(bmp,0,0,c.width,c.height);
-    const blob = await new Promise(r=>c.toBlob(r,"image/jpeg",0.72));
-    return new Uint8Array(await blob.arrayBuffer());
+    const src = await this.decode(file);
+    const w0 = src.width||src.naturalWidth, h0 = src.height||src.naturalHeight;
+    let maxEdge=1200, q=0.72, best=null;
+    for(let i=0;i<8;i++){
+      const scale = Math.min(1, maxEdge/Math.max(w0,h0));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1,Math.round(w0*scale)); c.height = Math.max(1,Math.round(h0*scale));
+      c.getContext("2d").drawImage(src,0,0,c.width,c.height);
+      const blob = await new Promise(r=>c.toBlob(r,"image/jpeg",q));
+      if(!blob) break;
+      best = blob;
+      if(blob.size <= this.PHOTO_TARGET) break;
+      if(q > 0.5) q = Math.round((q-0.08)*100)/100; else maxEdge = Math.round(maxEdge*0.85);
+    }
+    if(!best) throw new Error("could not encode the photo");
+    if(best.size > this.PHOTO_HARD_CAP) throw new Error("photo would not compress under "+Math.round(this.PHOTO_HARD_CAP/1024)+" KB");
+    return { bytes:new Uint8Array(await best.arrayBuffer()), size:best.size, original:file.size,
+             width:Math.round(w0*Math.min(1,maxEdge/Math.max(w0,h0))), quality:q };
   }
 };
 const DECRYPT_MD = `# How to decrypt these photos without this app
@@ -2268,8 +2300,9 @@ function renderLog(){
     }
     h+=`</details></div>`;
 
-    h+=`<div class="card"><details><summary><b>Photos</b>${S.photos.length?` — ${S.photos.length}`:""}</summary>
-      <p class="mini" style="margin-top:8px">Encrypted on this device. Same pose, same light, same time of day.</p>`;
+    const photoBytes = S.photos.reduce((a,p)=>a+(p.bytes||0),0);
+    h+=`<div class="card"><details><summary><b>Photos</b>${S.photos.length?` — ${S.photos.length}, ${photoBytes>1048576?(photoBytes/1048576).toFixed(1)+" MB":Math.round(photoBytes/1024)+" KB"} total`:""}</summary>
+      <p class="mini" style="margin-top:8px">Compressed to about 150 KB and encrypted on this device before anything is uploaded. Same pose, same light, same time of day.</p>`;
     if(!Photo.key) h+=`<div class="row"><input type="password" id="pp" placeholder="Photo passphrase">
       <button class="btn" data-act="unlockphotos">Unlock</button></div>
       <p class="mini" style="margin-top:8px">Keep this in your password manager. Lose it and the photos are gone — the training log is deliberately not encrypted so that can never happen to your actual data.</p>`;
@@ -2689,12 +2722,15 @@ async function handle(a,t,ev){
     const inp=document.createElement("input"); inp.type="file"; inp.accept="image/*";
     inp.onchange=async()=>{ const f=inp.files[0]; if(!f) return;
       const d=todayISO(), id="p"+Date.now();
-      const small=await Photo.downscale(f);
-      const enc=await Photo.encrypt(small, id, d);
+      let small;
+      try{ small=await Photo.downscale(f); }
+      catch(err){ return toast("Couldn't compress that photo: "+(err.message||err), "bad"); }
+      const enc=await Photo.encrypt(small.bytes, id, d);
       await tx("photos","readwrite",s=>s.put({id, blob:enc.buffer}));
-      await append("photo",{id,d});
+      await append("photo",{id,d,bytes:small.size,original:small.original});
       if(Sync.configured()) try{ await Sync.putFile(`photos/${d.slice(0,4)}/${d}-${id}.jpg.enc`, enc, "photo "+d); }catch(e){}
-      rebuild(); render(); };
+      rebuild(); render();
+      toast(`Saved · ${Math.round(small.size/1024)} KB, down from ${(small.original/1048576).toFixed(1)} MB.`, "ok"); };
     return inp.click();
   }
   /* ---- setup ---- */
