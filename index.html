@@ -1,6 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-R55H73afgSyaAV5zTXGGOOwmfpAMD0BZM24NQ/BjhDc='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#f3f4f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -275,7 +276,7 @@ details[open] summary{margin-bottom:4px}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-11 15:47";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-11 15:54";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -1647,6 +1648,40 @@ function buildSlot(e, es, m, sets, ctx, ms, bumpRir, date){
     band:[es.lo,es.hiEff] };
 }
 
+/* ======================= TOKEN VAULT ===============================
+   The GitHub token is sealed at rest with an AES-GCM key that is generated
+   on this device, marked non-extractable, and stored as a CryptoKey object.
+   Honest scope: this protects the token in a storage dump, a device backup,
+   or a DevTools inspection — the raw string is never on disk. It does NOT
+   protect against script running on this origin, which can call open() the
+   same way the app does; that threat is what the hash-pinned CSP and the
+   zero-external-subresource rule are for.
+   =================================================================== */
+const Vault = {
+  async key(){
+    let k = await kvGet("device_key");
+    if(!(k instanceof CryptoKey)){
+      k = await crypto.subtle.generateKey({name:"AES-GCM", length:256}, false, ["encrypt","decrypt"]);
+      await kvPut("device_key", k);
+    }
+    return k;
+  },
+  async seal(text){
+    const k = await this.key(), iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({name:"AES-GCM", iv}, k, new TextEncoder().encode(text)));
+    return { v:1, iv:Array.from(iv), ct:Array.from(ct) };
+  },
+  async open(rec){
+    if(typeof rec === "string") return rec;          // legacy plaintext, migrated on next save
+    if(!rec || rec.v!==1 || !rec.iv || !rec.ct) return null;
+    try{
+      const k = await this.key();
+      const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:new Uint8Array(rec.iv)}, k, new Uint8Array(rec.ct));
+      return new TextDecoder().decode(pt);
+    }catch(e){ return null; }
+  },
+};
+
 /* ========================= GITHUB SYNC =============================
    The authoritative copy of every set is an ordinary file in a private
    git repo. Portability is by construction: the export format IS the
@@ -1661,8 +1696,11 @@ function buildSlot(e, es, m, sets, ctx, ms, bumpRir, date){
 const Sync = {
   token:null, owner:null, repo:null, pending:[], timer:null, state:"idle", lastOk:null, lastErr:null,
   async init(){
-    const tok = await kvGet("gh_token");
+    const raw = await kvGet("gh_token");
+    const tok = await Vault.open(raw);
     this.token = typeof tok === "string" && tok ? tok : null;
+    // a token stored in the clear by an older build is re-sealed on the spot
+    if(typeof raw === "string" && this.token) await kvPut("gh_token", await Vault.seal(this.token));
     const r = await kvGet("gh_repo");
     if(r && typeof r.owner === "string" && typeof r.repo === "string"){ this.owner=r.owner; this.repo=r.repo; }
     const lo = await kvGet("gh_lastok");
@@ -1796,7 +1834,8 @@ function snapshot(){
    just eliminated.
    =================================================================== */
 const Photo = {
-  key:null,
+  key:null, _lock:null,
+  touch(){ clearTimeout(this._lock); if(this.key) this._lock = setTimeout(()=>{ this.key=null; if(VIEW==="log") render(); }, 15*60*1000); },
   async salt(){
     let s = await kvGet("photo_salt");
     if(!s){ s = crypto.getRandomValues(new Uint8Array(16)); await kvPut("photo_salt", s);
@@ -1809,6 +1848,7 @@ const Photo = {
     this.key = await crypto.subtle.deriveKey(
       {name:"PBKDF2", salt, iterations:600000, hash:"SHA-256"},
       base, {name:"AES-GCM", length:256}, false, ["encrypt","decrypt"]);
+    this.touch();
     return this.key;
   },
   async encrypt(bytes, photoId, iso){
@@ -2496,8 +2536,8 @@ function dataCard(){
   let h=`<div class="card"><details ${Sync.configured()?"":"open"}><summary><b>Backup</b> — ${Sync.configured()?esc(Sync.state):"not connected"}</summary>
     <p class="mini" style="margin-top:8px">Plain text in a private GitHub repo, one file per training day. <code>git clone</code> gets it all back with no app.</p>
     <label class="fld"><span>Private data repo</span><input type="text" id="repo" placeholder="meni-gottesman/overload-data" value="${esc(st.repo||"")}"></label>
-    <label class="fld"><span>Token — Contents: read and write, that repo only</span>
-      <input type="password" id="tok" placeholder="${Sync.token?"•••••••• stored on this device":"github_pat_..."}"></label>
+    <label class="fld"><span>Token — Contents: read and write, that repo only, 90-day expiry</span>
+      <input type="password" id="tok" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${Sync.token?"•••••••• sealed on this device":"github_pat_..."}"></label>
     <button class="btn primary wide" data-act="savesync">Connect</button>
     <p class="mini" style="margin-top:8px">${esc(Sync.state)}${Sync.lastOk?` · last upload ${new Date(Sync.lastOk).toLocaleString()}`:""}${Sync.pending.length?` · ${Sync.pending.length} waiting`:""}${Sync.lastErr?` · ${esc(Sync.lastErr)}`:""}</p>
     <div class="row" style="margin-top:8px">
@@ -2584,6 +2624,7 @@ function askEndpoint(cb){
 /* ============================ ACTIONS ============================== */
 const REPBUF={};
 document.addEventListener("click", async (ev)=>{
+  Photo.touch();
   const t=ev.target.closest("[data-act],[data-v]"); if(!t) return;
   const a=t.dataset.act;
   try{ await handle(a,t,ev); }catch(err){ console.error(err); toast("Something went wrong: "+(err.message||err), "bad"); }
@@ -2825,7 +2866,7 @@ async function handle(a,t,ev){
     const repo=$("#repo").value.trim(), tok=$("#tok").value.trim();
     if(repo.includes("/")){ const [o,r]=repo.split("/"); Sync.owner=o; Sync.repo=r;
       await kvPut("gh_repo",{owner:o,repo:r}); await append("settings",{repo}); }
-    if(tok){ Sync.token=tok; await kvPut("gh_token",tok); await append("settings",{tokenSet:true}); }
+    if(tok){ Sync.token=tok; await kvPut("gh_token", await Vault.seal(tok)); await append("settings",{tokenSet:true}); }
     Sync.state="idle";
     /* The photo salt was pushed only at the moment it was generated, and only
        if sync happened to be configured already. Unlock photos before

@@ -49,7 +49,7 @@ const ctx={self:{},top:{},console,addEventListener:noop,
   document:{addEventListener:noop,querySelector:()=>stub,querySelectorAll:()=>[],createElement:()=>stub,body:stub},
   indexedDB:makeIDB(),navigator:{storage:null},location:{},
   setInterval:noop,setTimeout:(f,ms)=>setTimeout(f,ms),clearTimeout,
-  crypto:{getRandomValues:a=>a,subtle:{}},fetch:mockFetch,
+  crypto:globalThis.crypto,CryptoKey:globalThis.CryptoKey,fetch:mockFetch,
   btoa:s=>Buffer.from(s,"binary").toString("base64"),atob:s=>Buffer.from(s,"base64").toString("binary"),
   alert:noop,confirm:()=>true,CSS:{escape:s=>s},TextEncoder,TextDecoder,URL,Buffer};
 ctx.self.top=ctx.top; ctx.window=ctx; vm.createContext(ctx);
@@ -179,6 +179,37 @@ const ok=(n,c,e)=>{ if(c){pass++;console.log("  ✓ "+n);} else {fail++;console.
   ok("a fresh device does not claim to be configured", ctx.FRESH_CONFIGURED===false);
   ok("tapping Connect does not throw", ctx.CONNECT_ERR==="", ctx.CONNECT_ERR);
   ok("Connect queues the existing history for upload", ctx.CONNECT_QUEUED>0, ctx.CONNECT_QUEUED+" events");
+
+  console.log("\nVAULT — the token is sealed at rest, and an old plaintext token migrates");
+  await run(`(async()=>{
+    const rec = await Vault.seal("github_pat_SEALME");
+    V_SHAPE = rec && rec.v===1 && Array.isArray(rec.iv) && rec.iv.length===12 && Array.isArray(rec.ct);
+    V_NOT_PLAIN = JSON.stringify(rec).indexOf("SEALME")===-1;
+    V_ROUND = await Vault.open(rec);
+    const k = await kvGet("device_key");
+    V_KEY_NONEXTRACTABLE = (k instanceof CryptoKey) && k.extractable===false;
+    // a second seal of the same text must not repeat the IV
+    const rec2 = await Vault.seal("github_pat_SEALME");
+    V_IV_UNIQUE = rec2.iv.join(",")!==rec.iv.join(",");
+    // legacy: a plaintext token from an older build
+    await kvPut("gh_token", "github_pat_LEGACY");
+    Sync.token=null; await Sync.init();
+    V_LEGACY_READ = Sync.token;
+    const after = await kvGet("gh_token");
+    V_LEGACY_MIGRATED = typeof after==="object" && after.v===1 && JSON.stringify(after).indexOf("LEGACY")===-1;
+    // tampered ciphertext must not yield a token
+    const bad = Object.assign({}, rec, {ct: rec.ct.slice().reverse()});
+    V_TAMPER = await Vault.open(bad);
+  })()`);
+  await new Promise(r=>setTimeout(r,200));
+  ok("sealed record has the expected shape", ctx.V_SHAPE===true);
+  ok("the token string is not present in the stored record", ctx.V_NOT_PLAIN===true);
+  ok("seal → open round-trips", ctx.V_ROUND==="github_pat_SEALME", ctx.V_ROUND);
+  ok("the device key is a non-extractable CryptoKey", ctx.V_KEY_NONEXTRACTABLE===true);
+  ok("every seal uses a fresh IV", ctx.V_IV_UNIQUE===true);
+  ok("a plaintext token from an older build still reads", ctx.V_LEGACY_READ==="github_pat_LEGACY", ctx.V_LEGACY_READ);
+  ok("…and is re-sealed on the spot", ctx.V_LEGACY_MIGRATED===true);
+  ok("tampered ciphertext yields no token, not garbage", ctx.V_TAMPER===null, JSON.stringify(ctx.V_TAMPER));
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   process.exit(fail?1:0);

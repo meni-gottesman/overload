@@ -45,6 +45,10 @@ Do not edit the fixture to make it pass — the fixture is the contract.
 
 ## Before any push
 
+0. `python3 build.py` — **always, last, after every edit to index.html.** It stamps the
+   build and re-pins the CSP `script-src` to the SHA-256 of the inline script. The policy
+   has no `'unsafe-inline'`: if the hash is stale, the browser refuses to run the app at all
+   and the page is blank. Run it, then verify the app opens.
 1. `node test.js` **and** `node test-sync.js` — every assertion green. A red test is a stop.
 2. Actually open the app and use it. Most real defects in this codebase have been found by
    driving the browser, not by reading: a warm-up eating a working set, a mid-session reload
@@ -62,7 +66,15 @@ Do not edit the fixture to make it pass — the fixture is the contract.
 - **No `alert()` or `confirm()`.** A native modal blocks the whole page on a phone.
 - **No external subresource.** No CDN, no webfont, no analytics. The page holds a token with
   write access to a private repo; a third-party script would run with full authority over it.
-  The CSP pins `connect-src` to `api.github.com`.
+  The CSP pins `connect-src` to `api.github.com` and `script-src` to the hash of the one
+  inline script — an injected `<script>`, inline handler or `javascript:` URL does not execute.
+  Never add an inline `onclick=`; use the delegated `data-act` listener.
+- **The token is sealed at rest** (`Vault`): AES-GCM under a device-generated non-extractable
+  CryptoKey. That protects a storage dump or device backup, not same-origin script — the CSP
+  and the no-subresource rule are what protect against that.
+- **Home Screen install is a security control, not a nicety.** Installed web apps get storage
+  that Safari tabs cannot read (WebKit: "no other website data is shared"). On the shared
+  `meni-gottesman.github.io` origin, that is the isolation.
 - **Four weight tiers, 4:1 ratio, ≤4 distinct values** (`weightsLegal`). The per-muscle
   evidence cannot support a finer vector; a prettier one would be fitting sampling error.
 - **No muscularity ceiling.** Curvature is real, its peak has never been located.
@@ -74,6 +86,7 @@ Do not edit the fixture to make it pass — the fixture is the contract.
 ## Where things are
 
     index.html              the whole app
+    build.py                stamp + re-pin the CSP hash; run before EVERY commit
     test.js                 replays the planner in a VM, asserts the invariants
     test-sync.js            drives Sync against a mock GitHub + fake IndexedDB
     fixtures/v1-log.json    frozen v1 event shapes — the compatibility contract
