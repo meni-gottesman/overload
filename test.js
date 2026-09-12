@@ -560,6 +560,59 @@ ok("progressing an assisted lift REDUCES the stack", ctx.ASSIST_DIR===true, ctx.
 ok("a normal lift still goes up", ctx.BARBELL_DIR===true);
 ok("a step never overshoots the request when a smaller rung exists", ctx.NO_OVERSHOOT===15, ctx.NO_OVERSHOOT);
 
+console.log("\nRETIRED — he said no to assisted lifts; plans never offer one, history keeps it");
+run(`
+  RETIRED_IDS = LIB.filter(e=>e.retired).map(e=>e.id);
+  ASSISTED_ALL_RETIRED = LIB.filter(e=>e.profile==="assisted").every(e=>e.retired);
+  S.settings=defaultSettings(); S.settings.startDate="2026-01-05"; S.settings.rampUntil="2026-01-06";
+  S.settings.screening="CLEAR";
+  for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  // Every training day for a year, every rotation block, with lats on every tier — no assisted lift may surface.
+  let leaks=[], altLeaks=[], swapLeaks=[], plans=0;
+  for(const tier of ["PRIORITY","STANDARD","MAINTAIN"]){
+    for(let i=0;i<365;i+=1){
+      const d=new Date(Date.UTC(2026,0,5+i)); const iso=d.toISOString().slice(0,10);
+      if(!S.settings.days.includes(d.getUTCDay())) continue;
+      for(const m of MUSCLES) S.mus[m]=newMuscleState();
+      S.mus.lats.tier=tier; S.mus.lats.target=12;
+      S.ex={}; S.sessions=[]; S.events=[]; S.planEdits={}; S.plans={};
+      const p=buildPlan(iso); plans++;
+      for(const sl of (p.slots||[])){
+        if(RETIRED_IDS.includes(sl.ex)) leaks.push(iso+":"+sl.ex);
+        for(const a of alternativesFor(sl.ex, sl.muscle, p.slots.map(x=>x.ex))) if(a.retired) altLeaks.push(iso+":"+a.id);
+      }
+    }
+  }
+  // Even if the index lift for lats were pointed at it, selection must refuse.
+  for(const m of MUSCLES) S.mus[m]=newMuscleState(); S.ex={}; S.sessions=[]; S.events=[]; S.planEdits={}; S.plans={};
+  const st0=Object.assign({}, S.settings); S.settings.indexLift=Object.assign({}, S.settings.indexLift||{}, {lats:"assisted_pullup"});
+  const pIdx=buildPlan("2026-03-02"); INDEX_LEAK=(pIdx.slots||[]).some(sl=>sl.ex==="assisted_pullup");
+  S.settings=st0;
+  LEAKS=leaks.length; ALT_LEAKS=altLeaks.length; PLANS=plans;
+  AVAILABLE_SAYS_NO = available(LIBX["assisted_pullup"])===false;
+  // A log that already holds a set on the retired lift still replays, still credits lats, still renders.
+  S.settings=defaultSettings(); for(const m of MUSCLES) S.mus[m]=newMuscleState(); for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  S.ex={}; S.sessions=[]; S.planEdits={}; S.plans={}; S.voided=new Set();
+  S.events=[{id:1,type:"settings",payload:S.settings},
+    {id:2,type:"set",d:"2026-02-02",payload:{d:"2026-02-02",ex:"assisted_pullup",load:36.3,reps:8,warmup:false,rom:1,assisted:0,rir:1,endpoint:"STOPPED_AT_RIR"}},
+    {id:3,type:"set",d:"2026-02-02",payload:{d:"2026-02-02",ex:"assisted_pullup",load:36.3,reps:7,warmup:false,rom:1,assisted:0,rir:1,endpoint:"STOPPED_AT_RIR"}},
+    {id:4,type:"sessionEnd",d:"2026-02-02",payload:{d:"2026-02-02",minutes:20}}];
+  let replayErr=""; try{ rebuild(); }catch(e){ replayErr=e.message; }
+  REPLAY_ERR=replayErr;
+  REPLAY_SETS=(S.sessions[0]||{sets:[]}).sets.filter(x=>x.ex==="assisted_pullup").length;
+  let renderErr=""; try{ renderLog(); }catch(e){ renderErr=e.message; }
+  RENDER_ERR2=renderErr;
+  LOG_SHOWS_IT=document.querySelector("#v-log").innerHTML.includes("Assisted pull-up");
+`);
+ok("the only assisted lift is retired, and every assisted profile is", ctx.RETIRED_IDS.join()==="assisted_pullup" && ctx.ASSISTED_ALL_RETIRED, ctx.RETIRED_IDS.join());
+ok("available() refuses a retired lift", ctx.AVAILABLE_SAYS_NO===true);
+ok("a year of plans on every tier never prescribes it", ctx.LEAKS===0, ctx.LEAKS+" leaks in "+ctx.PLANS+" plans");
+ok("no alternative ever offers it", ctx.ALT_LEAKS===0, ctx.ALT_LEAKS);
+ok("pointing the index lift at it does not smuggle it in", ctx.INDEX_LEAK===false);
+ok("a log that already holds it replays without error", ctx.REPLAY_ERR==="", ctx.REPLAY_ERR);
+ok("those past sets are still counted", ctx.REPLAY_SETS===2, ctx.REPLAY_SETS);
+ok("and the Log still shows them by name", ctx.RENDER_ERR2==="" && ctx.LOG_SHOWS_IT===true, ctx.RENDER_ERR2);
+
 console.log("\nSAF-PIN — a swap must re-derive safety, not inherit it");
 run(`
   S.settings=defaultSettings(); S.settings.spotterAt=0; S.settings.screening="CLEAR";

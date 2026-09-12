@@ -6,7 +6,7 @@ Deployed on every push to `main`, twice:
   - Cloudflare Pages → https://overload-o3a.pages.dev  (isolated origin; `_headers` applies here only)
 Both serve the same commit. IndexedDB is per-origin, so they hold separate local logs
 until backup is connected. GitHub Pages ignores `_headers` and caches for 10 minutes.
-Tests: `node test.js` (116 assertions) **and** `node test-sync.js` (31 assertions, runs the
+Tests: `node test.js` (124 assertions) **and** `node test-sync.js` (31 assertions, runs the
 real Sync code against a mock GitHub and an in-memory IndexedDB). Both must be green.
 
 ## The one rule that outranks everything
@@ -82,6 +82,10 @@ Do not edit the fixture to make it pass — the fixture is the contract.
   scale trend only.
 - **Engineering guesses stay labelled** in Settings → provenance. Do not quietly promote a
   guess to a finding.
+- **Lifts he has said no to are `retired`, never deleted.** `available()` refuses a retired
+  exercise, so no plan, alternative or swap can pick it; the library entry stays so any set
+  already logged on it keeps its name, photo and muscle credit. Assisted machines are retired
+  (2026-09-12: "I don't need any assisted exercises").
 
 ## Where things are
 

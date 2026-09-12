@@ -1,7 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Hqqg2NsiBLVPgK0K7hTUIE91awhA+a2UTvjNSrRXaDw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-JwGEa3snUJ30FZMrEeZ1m3HcIl32whgYRo2eCN3lYZQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#f3f4f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -303,7 +303,7 @@ details.more[open]>summary{color:var(--ink)}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-11 16:20";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-12 14:17";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -478,7 +478,8 @@ function ex(id,name,pattern,cls,contributions,profile,o){
     band:o.band||(cls==="isolation"?[8,14]:[6,10]),
     rest:o.rest||(cls==="isolation"?K.REST_ISOLATION:K.REST_COMPOUND),
     romSensitive:!!o.romSensitive, romCue:o.romCue||"", setup:o.setup||45,
-    seed:o.seed||null, index:o.index||null, superset:o.superset||[]};
+    seed:o.seed||null, index:o.index||null, superset:o.superset||[],
+    retired:!!o.retired};
 }
 const LIB = [
 // ---- chest ----
@@ -497,8 +498,12 @@ ex("lat_pulldown","Lat pulldown","vert_pull","ub_compound",{lats:1,mid_back:0.5,
    {equip:["machine_pulldown"],stability:0,failRisk:0,joints:{shoulder:1,elbow:1},index:"lats",lengthened:"high",setup:35}),
 ex("pulldown_neutral","Neutral-grip pulldown","vert_pull","ub_compound",{lats:1,mid_back:0.5,biceps:0.5},"machine_stack",
    {equip:["machine_pulldown"],stability:0,failRisk:0,joints:{shoulder:0,elbow:1},setup:35}),
+/* He does not want assisted lifts. The entry stays so any set already logged
+   on it keeps its name, photo and muscle credit; `retired` keeps it out of
+   every plan, alternative and swap from here on. Retire, never delete — a
+   deleted id makes past sets silently stop counting. */
 ex("assisted_pullup","Assisted pull-up (Gravitron)","vert_pull","ub_compound",{lats:1,mid_back:0.5,biceps:0.5},"assisted",
-   {equip:["gravitron"],stability:1,failRisk:0,joints:{shoulder:1,elbow:1},lengthened:"high",setup:40}),
+   {equip:["gravitron"],stability:1,failRisk:0,joints:{shoulder:1,elbow:1},lengthened:"high",setup:40,retired:true}),
 ex("csr_row","Chest-supported row","horiz_pull","ub_compound",{mid_back:1,lats:0.5,delts_rear:0.5,biceps:0.5,traps:0.5},"plate_machine",
    {equip:["machine_csrow"],stability:0,failRisk:0,joints:{shoulder:0,elbow:1},index:"mid_back",setup:45,superset:["chest","quads"]}),
 ex("cable_row","Seated cable row","horiz_pull","ub_compound",{mid_back:1,lats:0.5,delts_rear:0.5,biceps:0.5},"cable_stack",
@@ -1279,7 +1284,7 @@ function fmtLoad(kg){ if(kg==null) return "—";
   const v=fromKg(kg,u()); const r=Math.abs(v-Math.round(v))<0.05?Math.round(v):Math.round(v*10)/10;
   return r+" "+u(); }
 function fmtL(e,kg){ if(kg==null) return "—";
-  return (e.profile==="dumbbell_pair" && e.perSide ? "2 × " : "") + fmtLoad(kg); }
+  return (e && e.profile==="dumbbell_pair" && e.perSide ? "2 × " : "") + fmtLoad(kg); }
 
 /* ===================== PLATE MATH ==================================
    Nobody should be doing arithmetic between sets. Greedy from the heaviest
@@ -1617,6 +1622,7 @@ function buildPlan(date){
 }
 
 function available(e){
+  if(e.retired) return false;           // said no to it; history keeps it, plans never do
   const eq=S.settings.gym.equipment;
   return e.equip.every(x=>eq.includes(x));
 }
