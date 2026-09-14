@@ -1,7 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Jvt2oXmxCeUdXOURReDGbqxAFnwNmaBaQ3ZsaPPSs8A='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-kivanYnFSu/KY4D9qPzBaADWDupQYBnsnaZ/O4wwDAM='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#f3f4f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -315,7 +315,7 @@ details.more[open]>summary{color:var(--ink)}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-14 13:39";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-14 14:04";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -376,7 +376,6 @@ const K = {
   CUT_BAND: [-0.010, -0.005],    // -0.5..-1.0 %BW/wk
 
   /* --- allocation (VOL-13..15) --- */
-  RUN_MILES_CALF_HALF: 20, // CON-01 direct calf sets halve at this weekly mileage. ENGINEERING DEFAULT.
   BUDGET: { CUT:60, MAINTAIN:75, GAIN:90 },   // VOL-13 total fractional sets/week by phase.
                             // Key names must match the phase enum exactly — a mismatched key
                             // falls through to MAINTAIN and silently underfeeds a growth block.
@@ -803,11 +802,16 @@ function scheduleRevLogged(){
   return S.events.filter(e=>e.type==="settings").reduce((m,e)=>Math.max(m, e.payload.scheduleRev||1), 0) || 1;
 }
 function runOf(){ const r=(S.settings&&S.settings.run)||{days:[],miles:0}; return {days:r.days||[], miles:+r.miles||0}; }
-function isRunDay(iso){ return runOf().days.includes(dow(iso)) && runOf().miles>0; }
+function beforeStart(iso){ return !!(S.settings.startDate && iso < S.settings.startDate); }
+function isRunDay(iso){ return !beforeStart(iso) && runOf().days.includes(dow(iso)) && runOf().miles>0; }
 function isRestDay(iso){ return !S.settings.days.includes(dow(iso)) && !isRunDay(iso); }
 /* One-off "train anyway" is a date, not a permanent change to his week. */
-function isGymDay(iso){ return S.settings.days.includes(dow(iso)) || S.settings.trainAnyway===iso
+function isGymDay(iso){ if(beforeStart(iso)) return false;
+  return S.settings.days.includes(dow(iso)) || S.settings.trainAnyway===iso
   || !!(S.plans[iso] && S.plans[iso].status==="started"); }
+/* Day N: sessions lifted since day 1, plus one for the day in hand. */
+function dayNumber(iso){ const s0=S.settings.startDate||iso;
+  return S.sessions.filter(x=>x.date>=s0 && x.date<iso).length + 1; }
 function dow(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(y,m-1,d).getDay(); }
 
 /* ============================ STATE ================================ */
@@ -838,9 +842,12 @@ function defaultSettings(){
        decides each day what is due; it does not owe the week a fixed shape.
        scheduleRev lets a later note change this by appending a settings
        event, never by editing history. */
-    days:[1,2,4,5,6], run:{days:[1,2,4,5,6], miles:5}, scheduleRev:2,
+    days:[1,2,4,5,6], run:{days:[1,2,4,5,6], miles:5}, scheduleRev:3,
     minutes:120, slotHour:17, phase:"CUT",
-    screening:"CLEAR", rampUntil:null, startDate:null,
+    /* Day 1 (2026-09-14, his call): the program starts Tue 15 Sep 2026 at
+       full sets and normal reps in reserve — no calibration ramp, no 15-rep
+       test. Loads on day 1 are ENG-05 guesses that his first sets replace. */
+    screening:"CLEAR", rampUntil:null, startDate:"2026-09-15",
     w:{...W_MALE}, tier:defaultTiers(), indexLift:defaultIndexLifts(), sex:"male",
     bodyKg:toKg(180,"lb"), heightCm:177.8, firstRun:true,
     allowOverrule:true, spotterAt:0, unlockHighVolume:false, repo:null, tokenSet:false };
@@ -855,6 +862,25 @@ function defaultIndexLifts(){
   const ix={};
   for(const m of MUSCLES){ const e=LIB.find(x=>x.index===m); if(e) ix[m]=e.id; }
   return ix;
+}
+/* ENG-05: the first working load on every lift is a GUESS from bodyweight,
+   pitched a little light for a 180 lb 19-year-old who is not sure how long
+   he has lifted. Deliberately light: a guess that is under by a rung costs
+   one session (PRG-02 moves it up), a guess that is over costs the set. His
+   first logged sets replace the guess outright — see ingestSession. Per hand
+   for perSide lifts; 0 means bodyweight. Engineering choice, not a finding. */
+const SEED_BW = {
+  bb_bench:0.55, db_incline_30:0.20, machine_chest_press:0.55, cable_fly_low:0.15, pec_deck:0.45,
+  lat_pulldown:0.55, pulldown_neutral:0.55, csr_row:0.45, cable_row:0.55, db_row:0.30, straight_arm_pd:0.20,
+  cable_lat_raise:0.06, db_lat_raise:0.08, db_shoulder_press:0.18, cable_rear_delt:0.06, reverse_pec_deck:0.30,
+  db_shrug:0.30, oh_cable_tri:0.20, rope_pushdown:0.22, db_incline_curl:0.10, cable_curl:0.22, hammer_curl:0.12,
+  leg_press:1.20, hack_squat:0.60, bb_squat:0.65, goblet_squat:0.30, leg_extension:0.45,
+  seated_leg_curl:0.40, lying_leg_curl:0.35, rdl:0.70, db_rdl:0.25, hip_thrust:0.80, cable_kickback:0.10,
+  back_extension:0, standing_calf:0.80, seated_calf:0.35, ab_wheel:0, cable_crunch:0.35, pallof:0.12, suitcase_carry:0.30,
+};
+function seedLoad(e){
+  const f=SEED_BW[e.id]; if(f==null) return null;
+  return snapLoad(e, (S.settings.bodyKg||toKg(180,"lb"))*f);
 }
 function newExState(e){
   return { load:null, lo:e.band[0], hi:e.band[1], hiEff:e.band[1], target:e.band[0],
@@ -1018,7 +1044,11 @@ function ingestSession(sess){
          = reported x 1.12 (Nuzzo 2024 splines; the large between-exercise
          gap washes out of this particular ratio, so one constant covers
          everything and the app never ships a %1RM table). No max testing. */
-      es.load = snapLoad(e, sets[0].load * (es.seeded?1:K.SEED_MULT)); es.seeded=true;
+      /* A set logged against an ENG-05 guess was a working set at that load
+         — no multiplier. Old logs, whose first set was the 15-rep test,
+         carry no seedGuess flag and still get x1.12; the fixture proves it. */
+      const wasTest = !es.seeded && !sets[0].seedGuess;
+      es.load = snapLoad(e, sets[0].load * (wasTest?K.SEED_MULT:1)); es.seeded=true;
     }
     es.load = nearestLoad(set, es.load);   // invariant: always a real weight
     const W = sets.filter(s=>s.rom!==0 && !(s.assisted>0) && s.reps<=K.RIR_IGNORE_REPS);
@@ -1288,16 +1318,12 @@ function baseTarget(m){
   if(NO_DIRECT.has(m)) return 0;                                   // SEL-04
   const B = K.BUDGET[S.settings.phase] || K.BUDGET.MAINTAIN;
   const w = weightsOf(), den = directWeightSum() || 1;
-  let t = B*(w[m]||0)/den;
-  /* CON-01 ENGINEERING DEFAULT. Running is ~1,500 plantar-flexor contractions
-     a mile; at 20+ miles a week the calves and Achilles are already being
-     loaded most days. Direct calf sets are halved rather than dropped — the
-     stimulus is different (short, stretched, heavy) and the floor rule still
-     applies. Concurrent-training meta-analyses (Schumann 2022) find
-     hypertrophy is not compromised by endurance work, so this is a tendon-
-     load call, not a growth call. */
-  if(m==="calves" && weeklyRunMiles()>=K.RUN_MILES_CALF_HALF) t*=0.5;
-  return Math.round(t*2)/2;                                        // to the nearest half set
+  /* The runs are logged, never planned around. His call (2026-09-14): the
+     lifting is optimised for aesthetics on its own terms, whether or not he
+     ran. Concurrent-training meta-analyses (Schumann 2022) agree hypertrophy
+     is not compromised by endurance work, so nothing here reads S.runs or
+     the mileage. */
+  return Math.round((B*(w[m]||0)/den)*2)/2;                        // to the nearest half set
 }
 /* ~1 kcal per kg per km is the textbook running cost (Margaria 1963); net of
    what he would have burned anyway it is closer to 0.9. Rounded to the
@@ -1555,7 +1581,7 @@ function buildPlan(date){
   }
 
   const isTrainingDay = isGymDay(date);
-  if(!isTrainingDay) notes.push({rule:"USER", text: isRunDay(date) ? "A run day, not a lifting day." : "Rest day — no run, no gym."});
+  if(!isTrainingDay) notes.push({rule:"USER", text: beforeStart(date) ? `Day 1 is ${st.startDate}.` : isRunDay(date) ? "A run day, not a lifting day." : "Rest day — no run, no gym."});
 
   /* --- Phase 3: which muscles today (SEL-01..03) ---------------- */
   const needed={}, deficit={}, eligible=[];
@@ -1704,9 +1730,9 @@ function candidatesFor(m, block){
 
 function buildSlot(e, es, m, sets, ctx, ms, bumpRir, date){
   const set = loadableSet(e, S.settings.gym);
-  let load = es.load;
-  if(load==null) load = null;                       // cold start: measured on first exposure
-  else if(ctx.loadCap) load = nearestLoad(set, load*ctx.loadCap);
+  let load = es.load, seedGuess=false;
+  if(load==null){ load = seedLoad(e); seedGuess = load!=null; }   // ENG-05: day 1 starts from a guess, not a test
+  if(load!=null && ctx.loadCap) load = nearestLoad(set, load*ctx.loadCap);
   let rir = Math.max(e.cls==="isolation"?K.RIR_ISOLATION:K.RIR_COMPOUND, ctx.minRir) + bumpRir;
   if(ms.ladder==="DELOAD") rir = Math.max(rir, K.DELOAD_RIR);
 
@@ -1726,7 +1752,7 @@ function buildSlot(e, es, m, sets, ctx, ms, bumpRir, date){
   return { ex:e.id, name:e.name, muscle:m, sets, reps:es.target||e.band[0],
     load, loadSet:set, rir, rest:e.rest, isIndex:S.settings.indexLift[m]===e.id,
     risk:(e.failSafe?0:2)+e.failRisk, allowFailure, cls:e.cls,
-    calibration:false, needsSeed: es.load==null,
+    calibration:false, needsSeed: load==null, seedGuess,
     irritated, romSensitive:e.romSensitive, romCue:e.romCue,
     band:[es.lo,es.hiEff] };
 }
@@ -2207,7 +2233,8 @@ function render(){
   $("#boot").classList.add("hide");
   $("#tabs").classList.remove("hide");
   document.querySelectorAll(".view").forEach(v=>v.classList.remove("on"));
-  $("#topdate").textContent = new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+  const td=todayISO(), dl=new Date().toLocaleDateString(undefined,{weekday:"short",month:"short",day:"numeric"});
+  $("#topdate").textContent = (S.settings && isGymDay(td) && !beforeStart(td)) ? `Day ${dayNumber(td)} · ${dl}` : dl;
   $("#v-"+VIEW).classList.add("on");
   document.querySelectorAll("#tabs button").forEach(b=>b.setAttribute("aria-current", b.dataset.v===VIEW?"true":"false"));
   ({session:renderSession, log:renderLog})[VIEW]();
@@ -2251,15 +2278,17 @@ function renderSession(){
 
   if(!p.slots.length){
     const next = nextTrainingDay(date);
-    const rest = isRestDay(date), gym = isGymDay(date);
-    $("#v-session").innerHTML = h + weekStrip(date) + `<div class="card"><h2>${rest?"Rest day":gym?"Nothing to lift":"Run day"}</h2>
-      <p class="sub">${rest ? "No run, no gym. This is where the week's work turns into muscle."
+    const rest = isRestDay(date), gym = isGymDay(date), pre = beforeStart(date);
+    const startsIn = pre ? daysBetween(date, S.settings.startDate) : 0;
+    $("#v-session").innerHTML = h + weekStrip(date) + `<div class="card"><h2>${pre?`Day 1 is ${startsIn===1?"tomorrow":"in "+startsIn+" days"}`:rest?"Rest day":gym?"Nothing to lift":"Run day"}</h2>
+      <p class="sub">${pre ? "Full sets from the first session, starting loads guessed from your bodyweight, corrected by what you actually do. Nothing to do today."
+        : rest ? "No run, no gym. This is where the week's work turns into muscle."
         : gym ? "Everything is inside its 48-hour window, and the sets already banked this week are what count. The run still happens."
         : "Legs move, nothing gets lifted."}</p>
-      ${next?`<p class="sub">Next lifting day: <b>${esc(next)}</b>.</p>`:""}</div>`
+      ${next&&!pre?`<p class="sub">Next lifting day: <b>${esc(next)}</b>.</p>`:""}</div>`
       + runRow(date, false)
       + (rest ? `<button class="btn wide" data-act="trainanyway" style="margin-top:10px">I want to lift anyway</button>` : "")
-      + coachCard(p);
+      + (pre ? "" : coachCard(p));
     return;
   }
 
@@ -2375,6 +2404,7 @@ function renderSession(){
         <button class="step" data-act="rep+" data-ex="${s.ex}" aria-label="one more rep">+</button>
       </div>
       ${isLast&&s.calibration?`<p class="why">Calibration set: stop where you normally would, tap how many you had left, then keep going to a rep you can't finish and tell me how many extra you got.</p>`:""}
+      ${s.seedGuess&&!done.length?`<p class="why">Starting guess from your bodyweight — change it if it's off. Your reps set the real number from here.</p>`:""}
       ${s.needsSeed&&!done.length?`<p class="why">First time on this one — pick a weight you'd get about 15 times, then do 8. I'll work the rest out.</p>`:""}
       ${s.romSensitive&&s.romCue&&s.needsSeed&&!done.length?`<p class="mini">${esc(s.romCue)}</p>`:""}`;
     } else {
@@ -2407,8 +2437,8 @@ function weekStrip(date){
   const trained=new Set(S.sessions.map(x=>x.date));
   let h=`<div class="week">`;
   for(let i=0;i<7;i++){
-    const d=addDays(mon,i), isToday=d===date, plan=S.settings.days.includes(dow(d)), done=trained.has(d);
-    const run=isRunDay(d), ran=S.runs[d]!=null, rest=isRestDay(d);
+    const d=addDays(mon,i), isToday=d===date, plan=S.settings.days.includes(dow(d))&&!beforeStart(d), done=trained.has(d);
+    const run=isRunDay(d), ran=S.runs[d]!=null, rest=isRestDay(d)||beforeStart(d);
     h+=`<div class="wd${isToday?" today":""}${plan?" plan":""}${done?" done":""}${rest?" rest":""}">
       <span class="wl">${DAY_SHORT[dow(d)]}</span><span class="wn">${done?"✓":String(+d.slice(8))}</span>
       <span class="wr${run?(ran?" ran":" run"):""}"></span></div>`;
@@ -3190,7 +3220,8 @@ async function commitSet(exId, load, reps, rir, endpoint, extraReps){
     pReps: slot?slot.reps:reps, pLoad: slot?slot.load:load, pRir: slot?slot.rir:null,
     priorHard: r1(priorHard), hoursSince: Math.round(hoursSince),
     pos: slot?slot.pos:1, warmup:false, rom:1, assisted:0,
-    calibration: !!(slot&&slot.calibration), extraReps: extraReps==null?null:extraReps });
+    calibration: !!(slot&&slot.calibration), extraReps: extraReps==null?null:extraReps,
+    seedGuess: !!(slot&&slot.seedGuess) });
   await canaryWrite(S.events.length);
   // Weekly volume, per-exercise counts and the coach card all read derived
   // state; without this the Progress tab reported zero all session.
@@ -3223,16 +3254,18 @@ window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reaso
     // First run: stamp the dates that must be fixed once and never recomputed.
     // rampUntil especially — recomputing it daily would mean the ramp never ends.
     if(!S.events.some(e=>e.type==="settings")){
-      await append("settings", { startDate: todayISO(),
-        rampUntil: addDays(todayISO(), K.RAMP_DAYS), scheduleRev: defaultSettings().scheduleRev });
+      const d0=defaultSettings();
+      await append("settings", { startDate: d0.startDate || todayISO(), rampUntil: d0.rampUntil,
+        scheduleRev: d0.scheduleRev });
       rebuild();
     }
     /* A schedule he set later than the log began arrives as one more settings
        event, dated the day it took effect. Old logs fold the old days until
        this line, then the new ones — history stays exactly what it was. */
-    if(scheduleRevLogged() < 2){
+    if(scheduleRevLogged() < defaultSettings().scheduleRev){
       const d=defaultSettings();
-      await append("settings", { days:d.days, run:d.run, scheduleRev:2 });
+      // rev 2: his week. rev 3: day 1 is 2026-09-15, no ramp. One event carries both.
+      await append("settings", { days:d.days, run:d.run, startDate:d.startDate, rampUntil:d.rampUntil, scheduleRev:d.scheduleRev });
       rebuild();
     }
     const c = await canaryCheck();

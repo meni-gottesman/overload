@@ -6,7 +6,7 @@ Deployed on every push to `main`, twice:
   - Cloudflare Pages → https://overload-o3a.pages.dev  (isolated origin; `_headers` applies here only)
 Both serve the same commit. IndexedDB is per-origin, so they hold separate local logs
 until backup is connected. GitHub Pages ignores `_headers` and caches for 10 minutes.
-Tests: `node test.js` (138 assertions) **and** `node test-sync.js` (31 assertions, runs the
+Tests: `node test.js` (146 assertions) **and** `node test-sync.js` (31 assertions, runs the
 real Sync code against a mock GitHub and an in-memory IndexedDB). Both must be green.
 
 ## The one rule that outranks everything
@@ -88,6 +88,15 @@ Do not edit the fixture to make it pass — the fixture is the contract.
   week no fixed shape. A later change to his week bumps `scheduleRev` in `defaultSettings()`
   and boot appends one settings event when `scheduleRevLogged()` is behind — never edit old
   settings events. "Lift anyway" is `trainAnyway: <date>`, one day, not a new weekday.
+- **The runs are logged, never planned around.** `run` events tick a day; nothing in the
+  planner reads `S.runs` or the mileage (his call, 2026-09-14). The one run-related line in
+  the plan is copy — the run row sits after the lifts.
+- **Day 1 is a date, and it starts at full strength.** `startDate` is fixed in
+  `defaultSettings()` (2026-09-15); before it nothing is prescribed and no run is due. There
+  is no calibration ramp (`rampUntil:null`) and no 15-rep test: every lift's first load is an
+  ENG-05 guess from bodyweight (`SEED_BW`, `seedLoad()`), the slot carries `seedGuess:true`,
+  the logged set carries it too, and `ingestSession` takes that set's load as-is. Old logs
+  whose first set lacks the flag still get the x1.12 test multiplier — the fixture proves it.
 - **Lifts he has said no to are `retired`, never deleted.** `available()` refuses a retired
   exercise, so no plan, alternative or swap can pick it; the library entry stays so any set
   already logged on it keeps its name, photo and muscle credit. Assisted machines are retired

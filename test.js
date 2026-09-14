@@ -629,10 +629,11 @@ run(`
   S.settings.trainAnyway="2026-09-16";
   ANYWAY_WED=buildPlan("2026-09-16").slots.length; ANYWAY_NEXT_WED=buildPlan("2026-09-23").slots.length;
   delete S.settings.trainAnyway;
-  // calves: direct sets halve at 25 miles a week
-  CALF_RUN=baseTarget("calves"); const keep=S.settings.run; S.settings.run={days:[],miles:0}; CALF_NORUN=baseTarget("calves"); S.settings.run=keep;
-  LATS_SAME = baseTarget("lats");
-  S.settings.run={days:[],miles:0}; LATS_NORUN=baseTarget("lats"); S.settings.run=keep;
+  // the runs never touch the plan: same targets and same session whether he ran, or runs at all
+  const sig = ()=>JSON.stringify([MUSCLES.map(m=>baseTarget(m)), buildPlan("2026-09-17").slots.map(x=>[x.ex,x.sets,x.reps,x.load,x.rir])]);
+  const keep=S.settings.run;
+  SIG_RUNS=sig(); S.runs={"2026-09-14":5,"2026-09-15":5,"2026-09-16":5}; SIG_RAN=sig(); S.runs={};
+  S.settings.run={days:[],miles:0}; SIG_NORUN=sig(); S.settings.run=keep;
   // the run event folds last-wins; done:false un-ticks
   S.events=[{id:1,type:"settings",d:"2026-09-01",payload:{days:[1,2,4,5]}},          // an old log without the new fields
     {id:2,type:"run",d:"2026-09-14",payload:{d:"2026-09-14",miles:5,done:true}},
@@ -656,13 +657,13 @@ run(`
   TILE_RUNS=LOG_HTML.includes("1<small>/5</small></b><span>runs");
   MYWEEK=SECTIONS.find(x=>x.key==="days").value();
 `);
-ok("defaults: run days Mon Tue Thu Fri Sat, 5 miles, schedule rev 2", ctx.DEF_DAYS==="1,2,4,5,6" && ctx.DEF_RUN==='{"days":[1,2,4,5,6],"miles":5}' && ctx.DEF_REV===2, ctx.DEF_DAYS+" "+ctx.DEF_RUN);
+ok("defaults: run days Mon Tue Thu Fri Sat, 5 miles, schedule rev 3", ctx.DEF_DAYS==="1,2,4,5,6" && ctx.DEF_RUN==='{"days":[1,2,4,5,6],"miles":5}' && ctx.DEF_REV===3, ctx.DEF_DAYS+" "+ctx.DEF_RUN);
 ok("Wednesday and Sunday are rest days, the other five are run days", ctx.RESTFLAGS==="0010001" && ctx.RUNFLAGS==="1101110", ctx.RESTFLAGS+" / "+ctx.RUNFLAGS);
 ok("rest days get NO lifting slots — before this a Wednesday built a full session", ctx.SLOTS[2]===0 && ctx.SLOTS[6]===0, ctx.SLOTS.join());
 ok("run days can carry a session", ctx.SLOTS[0]>0, ctx.SLOTS.join());
 ok("the rest-day note says so in plain words", /Rest day/.test(ctx.WED_NOTE), ctx.WED_NOTE);
 ok("'lift anyway' is one date, not a new weekly rule", ctx.ANYWAY_WED>0 && ctx.ANYWAY_NEXT_WED===0, ctx.ANYWAY_WED+" / "+ctx.ANYWAY_NEXT_WED);
-ok("CON-01: 25 miles a week halves direct calf sets, touches nothing else", ctx.CALF_RUN>0 && Math.abs(ctx.CALF_RUN*2-ctx.CALF_NORUN)<=0.5 && ctx.LATS_SAME===ctx.LATS_NORUN, ctx.CALF_RUN+" vs "+ctx.CALF_NORUN);
+ok("the runs never change the lifting: identical targets and session with runs logged, or no runs at all", ctx.SIG_RUNS===ctx.SIG_RAN && ctx.SIG_RUNS===ctx.SIG_NORUN);
 ok("run events fold last-wins and un-tick", ctx.RUNS==='{"2026-09-14":5}', ctx.RUNS);
 ok("an old log without the new fields still folds, and is flagged for the schedule revision", ctx.OLD_DAYS==="1,2,4,5" && ctx.NEEDS_REV===true, ctx.OLD_DAYS+" needsRev="+ctx.NEEDS_REV);
 ok("Monday shows the run row after the lifts, ticked", ctx.MON_RUN===true);
@@ -670,6 +671,46 @@ ok("Wednesday shows the rest card, no run, and a one-off lift-anyway", ctx.WED_R
 ok("the week strip marks two rest days and five run dots", ctx.STRIP_REST===2 && ctx.STRIP_RUN===5, ctx.STRIP_REST+" / "+ctx.STRIP_RUN);
 ok("the Log tile counts runs against five", ctx.TILE_RUNS===true);
 ok("My week reads as miles plus rest days", ctx.MYWEEK==="5 mi · rest Wed Sun", ctx.MYWEEK);
+
+console.log("\nDAY 1 — tomorrow, full sets, guessed loads, no ramp, no 15-rep test");
+run(`
+  S.settings=defaultSettings(); S.settings.screening="CLEAR";
+  for(const m of MUSCLES) S.mus[m]=newMuscleState(); for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  S.ex={}; S.sessions=[]; S.events=[]; S.planEdits={}; S.plans={}; S.runs={};
+  START=S.settings.startDate; RAMP=S.settings.rampUntil;
+  const pre=buildPlan("2026-09-14"), d1=buildPlan("2026-09-15");
+  PRE_SLOTS=pre.slots.length; PRE_NOTE=(pre.notes.find(n=>n.rule==="USER")||{}).text||"";
+  PRE_RUN=isRunDay("2026-09-14"); D1_RUN=isRunDay("2026-09-15");
+  D1_SLOTS=d1.slots.length; D1_RAMP=!!d1.ramping;
+  D1_LOADS_SET=d1.slots.every(sl=>sl.load!=null && sl.seedGuess===true && !sl.needsSeed);
+  D1_LOADS_LEGAL=d1.slots.every(sl=>sl.loadSet.some(v=>Math.abs(v-sl.load)<=LOAD_EPS));
+  D1_FULL=d1.slots.some(sl=>sl.sets>K.RAMP_MAX_SETS) && d1.slots.every(sl=>sl.rir<K.RAMP_MIN_RIR);
+  D1_RIR=d1.slots.map(sl=>sl.rir); D1_SETS=d1.slots.map(sl=>sl.sets);
+  BENCH=seedLoad(LIBX.bb_bench); BENCH_LB=Math.round(fromKg(BENCH,"lb"));
+  // his first logged set against a guess IS the load — no x1.12
+  const sl=d1.slots[0]; const e=LIBX[sl.ex];
+  // (a past day 1, because today's own session is never ingested until tomorrow)
+  const DD="2026-09-08";
+  S.events=[{id:1,type:"settings",d:"2026-09-01",payload:{startDate:DD,scheduleRev:3}}];
+  for(let i=0;i<sl.sets;i++) S.events.push({id:2+i,type:"set",d:DD,payload:{d:DD,ex:sl.ex,load:sl.load,reps:sl.reps,rir:1,endpoint:"STOPPED_AT_RIR",pReps:sl.reps,pLoad:sl.load,warmup:false,rom:1,assisted:0,seedGuess:true}});
+  S.events.push({id:99,type:"sessionEnd",d:DD,payload:{d:DD,minutes:40}});
+  rebuild();
+  AFTER_LOAD=S.ex[sl.ex].load; GUESS=sl.load; NO_MULT=Math.abs(AFTER_LOAD-GUESS)<=LOAD_EPS;
+  DAY2=dayNumber("2026-09-10"); DAY1=dayNumber(DD);
+  // an old-style set (no seedGuess) still gets the 15-rep-test multiplier
+  S.events=[{id:1,type:"settings",d:"2026-08-01",payload:{startDate:"2026-08-01"}},
+    {id:2,type:"set",d:"2026-08-03",payload:{d:"2026-08-03",ex:"lat_pulldown",load:toKg(100,"lb"),reps:6,pReps:6,warmup:false,rom:1,assisted:0}},
+    {id:3,type:"sessionEnd",d:"2026-08-03",payload:{d:"2026-08-03",minutes:30}}];
+  rebuild(); OLD_MULT=Math.round(fromKg(S.ex.lat_pulldown.load,"lb"));
+`);
+ok("day 1 is 2026-09-15 and there is no ramp", ctx.START==="2026-09-15" && ctx.RAMP===null, ctx.START+" "+ctx.RAMP);
+ok("the day before day 1 prescribes nothing and says why", ctx.PRE_SLOTS===0 && /Day 1 is 2026-09-15/.test(ctx.PRE_NOTE) && ctx.PRE_RUN===false, ctx.PRE_NOTE);
+ok("day 1 is a full session with normal reps in reserve, not the 2-set / 3-RIR ramp", ctx.D1_SLOTS>0 && ctx.D1_RAMP===false && ctx.D1_FULL, "sets "+ctx.D1_SETS+" rir "+ctx.D1_RIR);
+ok("every day-1 lift carries a guessed load the gym can make", ctx.D1_LOADS_SET && ctx.D1_LOADS_LEGAL);
+ok("the bench guess is plausible for 180 lb (95-105 lb)", ctx.BENCH_LB>=95 && ctx.BENCH_LB<=105, ctx.BENCH_LB+" lb");
+ok("a set logged against the guess becomes the load (no x1.12), and progression runs from there", ctx.NO_MULT===true, ctx.GUESS+" -> "+ctx.AFTER_LOAD);
+ok("day numbering: day 1, then day 2 after one session", ctx.DAY1===1 && ctx.DAY2===2, ctx.DAY1+" "+ctx.DAY2);
+ok("old logs whose first set was the 15-rep test still fold with the multiplier", ctx.OLD_MULT===110, ctx.OLD_MULT);
 
 console.log("\nSAF-PIN — a swap must re-derive safety, not inherit it");
 run(`
