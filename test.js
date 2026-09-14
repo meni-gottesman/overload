@@ -613,6 +613,64 @@ ok("a log that already holds it replays without error", ctx.REPLAY_ERR==="", ctx
 ok("those past sets are still counted", ctx.REPLAY_SETS===2, ctx.REPLAY_SETS);
 ok("and the Log still shows them by name", ctx.RENDER_ERR2==="" && ctx.LOG_SHOWS_IT===true, ctx.RENDER_ERR2);
 
+console.log("\nHIS WEEK — five runs, two rest days, the gym picks from the run days");
+run(`
+  S.settings=defaultSettings(); S.settings.startDate="2026-09-01"; S.settings.rampUntil="2026-09-02"; S.settings.screening="CLEAR";
+  for(const m of MUSCLES) S.mus[m]=newMuscleState(); for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  S.ex={}; S.sessions=[]; S.events=[]; S.planEdits={}; S.plans={}; S.runs={};
+  DEF_DAYS=S.settings.days.join(); DEF_RUN=JSON.stringify(S.settings.run); DEF_REV=S.settings.scheduleRev;
+  // 2026-09-14 is a Monday
+  const W=["2026-09-14","2026-09-15","2026-09-16","2026-09-17","2026-09-18","2026-09-19","2026-09-20"];
+  SLOTS=W.map(d=>buildPlan(d).slots.length);
+  RESTFLAGS=W.map(d=>isRestDay(d)?1:0).join("");
+  RUNFLAGS=W.map(d=>isRunDay(d)?1:0).join("");
+  WED_NOTE=(buildPlan("2026-09-16").notes.find(n=>n.rule==="USER")||{}).text||"";
+  // train-anyway is one date, not a new weekday
+  S.settings.trainAnyway="2026-09-16";
+  ANYWAY_WED=buildPlan("2026-09-16").slots.length; ANYWAY_NEXT_WED=buildPlan("2026-09-23").slots.length;
+  delete S.settings.trainAnyway;
+  // calves: direct sets halve at 25 miles a week
+  CALF_RUN=baseTarget("calves"); const keep=S.settings.run; S.settings.run={days:[],miles:0}; CALF_NORUN=baseTarget("calves"); S.settings.run=keep;
+  LATS_SAME = baseTarget("lats");
+  S.settings.run={days:[],miles:0}; LATS_NORUN=baseTarget("lats"); S.settings.run=keep;
+  // the run event folds last-wins; done:false un-ticks
+  S.events=[{id:1,type:"settings",d:"2026-09-01",payload:{days:[1,2,4,5]}},          // an old log without the new fields
+    {id:2,type:"run",d:"2026-09-14",payload:{d:"2026-09-14",miles:5,done:true}},
+    {id:3,type:"run",d:"2026-09-15",payload:{d:"2026-09-15",miles:5,done:true}},
+    {id:4,type:"run",d:"2026-09-15",payload:{d:"2026-09-15",miles:0,done:false}}];
+  rebuild();
+  RUNS=JSON.stringify(S.runs); OLD_DAYS=S.settings.days.join(); OLD_REV=S.settings.scheduleRev;
+  NEEDS_REV=scheduleRevLogged()<2;
+  // rendering: Monday shows the run row after the lifts, Wednesday shows a rest card and no run
+  S.events.push({id:5,type:"settings",d:"2026-09-14",payload:{days:[1,2,4,5,6],run:{days:[1,2,4,5,6],miles:5},scheduleRev:2}});
+  rebuild(); S.settings.startDate="2026-09-01"; S.settings.rampUntil="2026-09-02";
+  const realToday=todayISO;
+  todayISO=()=>"2026-09-14"; renderSession(); MON_HTML=document.querySelector("#v-session").innerHTML;
+  todayISO=()=>"2026-09-16"; renderSession(); WED_HTML=document.querySelector("#v-session").innerHTML;
+  todayISO=()=>"2026-09-14"; renderLog(); LOG_HTML=document.querySelector("#v-log").innerHTML;
+  todayISO=realToday;
+  MON_RUN=MON_HTML.includes("runrow is-done") && MON_HTML.includes("Run 5 mi") && MON_HTML.indexOf("runrow")>MON_HTML.lastIndexOf("exrow");
+  WED_REST=WED_HTML.includes("Rest day") && !WED_HTML.includes("runrow") && WED_HTML.includes("lift anyway");
+  STRIP_REST=(MON_HTML.match(/wd[^"]*rest/g)||[]).length;
+  STRIP_RUN=(MON_HTML.match(/class="wr (run|ran)"/g)||[]).length;
+  TILE_RUNS=LOG_HTML.includes("1<small>/5</small></b><span>runs");
+  MYWEEK=SECTIONS.find(x=>x.key==="days").value();
+`);
+ok("defaults: run days Mon Tue Thu Fri Sat, 5 miles, schedule rev 2", ctx.DEF_DAYS==="1,2,4,5,6" && ctx.DEF_RUN==='{"days":[1,2,4,5,6],"miles":5}' && ctx.DEF_REV===2, ctx.DEF_DAYS+" "+ctx.DEF_RUN);
+ok("Wednesday and Sunday are rest days, the other five are run days", ctx.RESTFLAGS==="0010001" && ctx.RUNFLAGS==="1101110", ctx.RESTFLAGS+" / "+ctx.RUNFLAGS);
+ok("rest days get NO lifting slots — before this a Wednesday built a full session", ctx.SLOTS[2]===0 && ctx.SLOTS[6]===0, ctx.SLOTS.join());
+ok("run days can carry a session", ctx.SLOTS[0]>0, ctx.SLOTS.join());
+ok("the rest-day note says so in plain words", /Rest day/.test(ctx.WED_NOTE), ctx.WED_NOTE);
+ok("'lift anyway' is one date, not a new weekly rule", ctx.ANYWAY_WED>0 && ctx.ANYWAY_NEXT_WED===0, ctx.ANYWAY_WED+" / "+ctx.ANYWAY_NEXT_WED);
+ok("CON-01: 25 miles a week halves direct calf sets, touches nothing else", ctx.CALF_RUN>0 && Math.abs(ctx.CALF_RUN*2-ctx.CALF_NORUN)<=0.5 && ctx.LATS_SAME===ctx.LATS_NORUN, ctx.CALF_RUN+" vs "+ctx.CALF_NORUN);
+ok("run events fold last-wins and un-tick", ctx.RUNS==='{"2026-09-14":5}', ctx.RUNS);
+ok("an old log without the new fields still folds, and is flagged for the schedule revision", ctx.OLD_DAYS==="1,2,4,5" && ctx.NEEDS_REV===true, ctx.OLD_DAYS+" needsRev="+ctx.NEEDS_REV);
+ok("Monday shows the run row after the lifts, ticked", ctx.MON_RUN===true);
+ok("Wednesday shows the rest card, no run, and a one-off lift-anyway", ctx.WED_REST===true);
+ok("the week strip marks two rest days and five run dots", ctx.STRIP_REST===2 && ctx.STRIP_RUN===5, ctx.STRIP_REST+" / "+ctx.STRIP_RUN);
+ok("the Log tile counts runs against five", ctx.TILE_RUNS===true);
+ok("My week reads as miles plus rest days", ctx.MYWEEK==="5 mi · rest Wed Sun", ctx.MYWEEK);
+
 console.log("\nSAF-PIN — a swap must re-derive safety, not inherit it");
 run(`
   S.settings=defaultSettings(); S.settings.spotterAt=0; S.settings.screening="CLEAR";

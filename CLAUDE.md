@@ -6,7 +6,7 @@ Deployed on every push to `main`, twice:
   - Cloudflare Pages → https://overload-o3a.pages.dev  (isolated origin; `_headers` applies here only)
 Both serve the same commit. IndexedDB is per-origin, so they hold separate local logs
 until backup is connected. GitHub Pages ignores `_headers` and caches for 10 minutes.
-Tests: `node test.js` (124 assertions) **and** `node test-sync.js` (31 assertions, runs the
+Tests: `node test.js` (138 assertions) **and** `node test-sync.js` (31 assertions, runs the
 real Sync code against a mock GitHub and an in-memory IndexedDB). Both must be green.
 
 ## The one rule that outranks everything
@@ -31,7 +31,7 @@ So:
 - **Never** change `DB_NAME`, the object store names, or `DB_VER` without a real migration.
 - **Never** rename or remove an existing event `type` string: `settings`, `set`, `voidSet`,
   `weight`, `waist`, `note`, `photo`, `irritation`, `redflag`, `planStart`, `planEdit`,
-  `sessionEnd`.
+  `sessionEnd`, `run`.
 - **Never** rename or repurpose an existing field in an event payload. Adding a new
   *optional* field is fine and is how this schema is meant to grow.
 - **Never** write a migration that rewrites past events. Append a correcting event instead —
@@ -82,6 +82,12 @@ Do not edit the fixture to make it pass — the fixture is the contract.
   scale trend only.
 - **Engineering guesses stay labelled** in Settings → provenance. Do not quietly promote a
   guess to a finding.
+- **His week is data, revised by appending.** `settings.days` are the gym-eligible days,
+  `settings.run` the run that happens on each run day, and a day in neither is rest. The
+  planner never prescribes on a non-gym day; it decides each gym day what is due and owes the
+  week no fixed shape. A later change to his week bumps `scheduleRev` in `defaultSettings()`
+  and boot appends one settings event when `scheduleRevLogged()` is behind — never edit old
+  settings events. "Lift anyway" is `trainAnyway: <date>`, one day, not a new weekday.
 - **Lifts he has said no to are `retired`, never deleted.** `available()` refuses a retired
   exercise, so no plan, alternative or swap can pick it; the library entry stays so any set
   already logged on it keeps its name, photo and muscle credit. Assisted machines are retired

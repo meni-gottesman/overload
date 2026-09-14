@@ -1,7 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-JwGEa3snUJ30FZMrEeZ1m3HcIl32whgYRo2eCN3lYZQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-Jvt2oXmxCeUdXOURReDGbqxAFnwNmaBaQ3ZsaPPSs8A='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#f3f4f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -263,6 +263,18 @@ details.more[open]>summary{color:var(--ink)}
 .tile b{font-size:26px;line-height:1;font-weight:600;letter-spacing:-.02em}
 .tile b small{font-size:var(--t-sm);color:var(--ink2);font-weight:500;margin-left:2px}
 .tile span{font:500 var(--t-xs)/1 var(--sans);color:var(--ink2);letter-spacing:.02em}
+.runrow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-top:12px;font:inherit;cursor:pointer;min-height:56px}
+.runrow .mark{font-family:var(--mono);font-size:var(--t-md);color:var(--ink3);width:18px;text-align:center}
+.runrow.is-done{background:var(--sunken)} .runrow.is-done .mark{color:var(--accent)}
+.runrow .grow{flex:1;min-width:0}
+.runrow .grow b{display:block;font-family:var(--serif);font-weight:600;font-size:var(--t-lg);line-height:1.15}
+.runrow .grow .mini{display:block;margin-top:2px}
+.wd.rest .wl,.wd.rest .wn{opacity:.45}
+.wr{display:block;width:5px;height:5px;border-radius:50%;margin:4px auto 0;background:transparent}
+.wr.run{border:1px solid var(--ink3)} .wr.ran{background:var(--accent);border-color:var(--accent)}
+.days7{display:grid;grid-template-columns:repeat(7,1fr);gap:4px} .days7 .chip{min-width:0;padding:0 2px;font-size:var(--t-sm)}
+.tiles.four{grid-template-columns:repeat(4,1fr);gap:6px}
+.tiles.four .tile{padding:10px 8px} .tiles.four .tile b{font-size:22px}
 .vol{height:5px;background:var(--sunken);border-radius:3px;margin-top:5px;overflow:hidden}
 .vol i{display:block;height:100%;background:var(--accent);border-radius:3px}
 </style>
@@ -303,7 +315,7 @@ details.more[open]>summary{color:var(--ink)}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-12 14:17";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-14 13:39";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -364,6 +376,7 @@ const K = {
   CUT_BAND: [-0.010, -0.005],    // -0.5..-1.0 %BW/wk
 
   /* --- allocation (VOL-13..15) --- */
+  RUN_MILES_CALF_HALF: 20, // CON-01 direct calf sets halve at this weekly mileage. ENGINEERING DEFAULT.
   BUDGET: { CUT:60, MAINTAIN:75, GAIN:90 },   // VOL-13 total fractional sets/week by phase.
                             // Key names must match the phase enum exactly — a mismatched key
                             // falls through to MAINTAIN and silently underfeeds a growth block.
@@ -784,13 +797,24 @@ function isoWeek(iso){ const [y,m,d]=iso.split("-").map(Number); const dt=new Da
   const f=new Date(Date.UTC(dt.getUTCFullYear(),0,4)); const fn=(f.getUTCDay()+6)%7;
   f.setUTCDate(f.getUTCDate()-fn+3);
   return dt.getUTCFullYear()+"-W"+String(1+Math.round((dt-f)/6048e5)).padStart(2,"0"); }
+/* The revision the LOG carries, not the one the defaults carry — the fold
+   starts from defaults, so reading S.settings here would always say "current". */
+function scheduleRevLogged(){
+  return S.events.filter(e=>e.type==="settings").reduce((m,e)=>Math.max(m, e.payload.scheduleRev||1), 0) || 1;
+}
+function runOf(){ const r=(S.settings&&S.settings.run)||{days:[],miles:0}; return {days:r.days||[], miles:+r.miles||0}; }
+function isRunDay(iso){ return runOf().days.includes(dow(iso)) && runOf().miles>0; }
+function isRestDay(iso){ return !S.settings.days.includes(dow(iso)) && !isRunDay(iso); }
+/* One-off "train anyway" is a date, not a permanent change to his week. */
+function isGymDay(iso){ return S.settings.days.includes(dow(iso)) || S.settings.trainAnyway===iso
+  || !!(S.plans[iso] && S.plans[iso].status==="started"); }
 function dow(iso){ const [y,m,d]=iso.split("-").map(Number); return new Date(y,m-1,d).getDay(); }
 
 /* ============================ STATE ================================ */
 const S = { events:[], settings:null, ex:{}, mus:{}, irr:{}, sessions:[], bw:[], photos:[],
             waist:[], notes:[], diffs:[], plans:{}, planEdits:{}, voided:new Set(),
             redflag:false, calibLast:null, restricted:false,
-            phaseSince:null };
+            phaseSince:null, runs:{} };
 
 /* ===================== SINGLE-USER CONFIGURATION ==================
    This app has exactly one user and I already know his answers, so there is
@@ -809,7 +833,13 @@ const S = { events:[], settings:null, ex:{}, mus:{}, irr:{}, sessions:[], bw:[],
    ================================================================= */
 function defaultSettings(){
   return { onboarded:true, unit:"lb", gym:JSON.parse(JSON.stringify(RSF_DEFAULT_GYM)),
-    days:[1,2,4,5], minutes:120, slotHour:17, phase:"CUT",
+    /* His week (2026-09-14): a 5-mile run Mon Tue Thu Fri Sat; Wed and Sun
+       are rest — no run, no gym. The gym may use ANY of the run days and
+       decides each day what is due; it does not owe the week a fixed shape.
+       scheduleRev lets a later note change this by appending a settings
+       event, never by editing history. */
+    days:[1,2,4,5,6], run:{days:[1,2,4,5,6], miles:5}, scheduleRev:2,
+    minutes:120, slotHour:17, phase:"CUT",
     screening:"CLEAR", rampUntil:null, startDate:null,
     w:{...W_MALE}, tier:defaultTiers(), indexLift:defaultIndexLifts(), sex:"male",
     bodyKg:toKg(180,"lb"), heightCm:177.8, firstRun:true,
@@ -845,7 +875,7 @@ function emit(list, field, oldV, newV, triggerVar, triggerVal, ruleId, sentence)
 
 function rebuild(){
   S.settings = defaultSettings(); S.ex={}; S.mus={}; S.irr={}; S.sessions=[]; S.bw=[];
-  S.photos=[]; S.waist=[]; S.notes=[]; S.diffs=[]; S.plans={}; S.planEdits={}; S.redflag=false; S.calibLast=null; S.phaseSince=null;
+  S.photos=[]; S.waist=[]; S.notes=[]; S.diffs=[]; S.plans={}; S.planEdits={}; S.redflag=false; S.calibLast=null; S.phaseSince=null; S.runs={};
   for(const m of MUSCLES) S.mus[m]=newMuscleState();
   for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
 
@@ -865,6 +895,7 @@ function rebuild(){
     else if(ev.type==="note") S.notes.push({d:p.d, text:p.text, ts:ev.ts});
     else if(ev.type==="redflag") S.redflag = !!p.active;
     else if(ev.type==="weight") S.bw.push({d:p.d,kg:p.kg});
+    else if(ev.type==="run"){ if(p.done===false) delete S.runs[p.d]; else S.runs[p.d]=+p.miles||0; }
     else if(ev.type==="photo") S.photos.push(p);
     else if(ev.type==="irritation"){ S.irr[p.joint]={sev:p.sev,at:p.d,quality:p.quality||null}; }
     else if(ev.type==="set"){ p._id=ev.id; (byDate[p.d]=byDate[p.d]||[]).push(p); }
@@ -1257,8 +1288,24 @@ function baseTarget(m){
   if(NO_DIRECT.has(m)) return 0;                                   // SEL-04
   const B = K.BUDGET[S.settings.phase] || K.BUDGET.MAINTAIN;
   const w = weightsOf(), den = directWeightSum() || 1;
-  return Math.round((B*(w[m]||0)/den)*2)/2;                        // to the nearest half set
+  let t = B*(w[m]||0)/den;
+  /* CON-01 ENGINEERING DEFAULT. Running is ~1,500 plantar-flexor contractions
+     a mile; at 20+ miles a week the calves and Achilles are already being
+     loaded most days. Direct calf sets are halved rather than dropped — the
+     stimulus is different (short, stretched, heavy) and the floor rule still
+     applies. Concurrent-training meta-analyses (Schumann 2022) find
+     hypertrophy is not compromised by endurance work, so this is a tendon-
+     load call, not a growth call. */
+  if(m==="calves" && weeklyRunMiles()>=K.RUN_MILES_CALF_HALF) t*=0.5;
+  return Math.round(t*2)/2;                                        // to the nearest half set
 }
+/* ~1 kcal per kg per km is the textbook running cost (Margaria 1963); net of
+   what he would have burned anyway it is closer to 0.9. Rounded to the
+   nearest hundred because the estimate does not deserve more. */
+function runKcalLine(){ const mi=weeklyRunMiles(); if(!mi) return "";
+  const kcal=Math.round(S.settings.bodyKg*mi*1.609*0.9/100)*100;
+  return `${mi} miles a week is roughly ${kcal.toLocaleString()} kcal.`; }
+function weeklyRunMiles(){ const r=runOf(); return r.days.length*r.miles; }
 /* VOL-15: the evidence resolves four tiers, so refuse any edit steeper than
    4:1 or carrying more than four distinct values. A finer vector is a claim
    this literature cannot support. */
@@ -1507,8 +1554,8 @@ function buildPlan(date){
     ctx.maxSets=K.RAMP_MAX_SETS; ctx.weeklyCap=K.RAMP_WEEKLY_CAP;
   }
 
-  const isTrainingDay = st.days.includes(dow(date));
-  if(!isTrainingDay && !S.plans[date]) notes.push({rule:"USER", text:"Not one of your training days."});
+  const isTrainingDay = isGymDay(date);
+  if(!isTrainingDay) notes.push({rule:"USER", text: isRunDay(date) ? "A run day, not a lifting day." : "Rest day — no run, no gym."});
 
   /* --- Phase 3: which muscles today (SEL-01..03) ---------------- */
   const needed={}, deficit={}, eligible=[];
@@ -1532,7 +1579,10 @@ function buildPlan(date){
   if(shut.length) notes.push({rule:"SAF-05",
     text:`Nothing here trains ${listOf(shut.map(m=>MUSCLE_LABEL[m].toLowerCase()))} without loading a joint you've flagged, so today goes elsewhere. ${shut.length>1?"They come":"It comes"} back as the flag fades.`});
   let bumpRir=0, setScale=1;
-  let pool = trainable;
+  /* Not a gym day: nothing is prescribed, whatever is due. The eligible
+     muscles simply wait for the next gym day. Before this gate a Wednesday
+     built a full session and only footnoted that it was not a training day. */
+  let pool = isTrainingDay ? trainable : [];
   if(!pool.length && isTrainingDay){
     pool=[MUSCLES.slice().sort((a,b)=>deficit[b]-deficit[a])[0]];
     bumpRir=2; setScale=0.75;
@@ -2201,10 +2251,14 @@ function renderSession(){
 
   if(!p.slots.length){
     const next = nextTrainingDay(date);
-    $("#v-session").innerHTML = h + `<div class="card"><h2>Rest day</h2>
-      <p class="sub">Nothing due. Muscles need 48 hours between hard sessions, and the sets you've already banked this week are what count.</p>
-      ${next?`<p class="sub">Next session: <b>${esc(next)}</b>.</p>`:""}
-      <button class="btn wide" data-act="trainanyway">I want to train anyway</button></div>`
+    const rest = isRestDay(date), gym = isGymDay(date);
+    $("#v-session").innerHTML = h + weekStrip(date) + `<div class="card"><h2>${rest?"Rest day":gym?"Nothing to lift":"Run day"}</h2>
+      <p class="sub">${rest ? "No run, no gym. This is where the week's work turns into muscle."
+        : gym ? "Everything is inside its 48-hour window, and the sets already banked this week are what count. The run still happens."
+        : "Legs move, nothing gets lifted."}</p>
+      ${next?`<p class="sub">Next lifting day: <b>${esc(next)}</b>.</p>`:""}</div>`
+      + runRow(date, false)
+      + (rest ? `<button class="btn wide" data-act="trainanyway" style="margin-top:10px">I want to lift anyway</button>` : "")
       + coachCard(p);
     return;
   }
@@ -2228,7 +2282,7 @@ function renderSession(){
   const doneCount = p.slots.filter(s=>(logged[s.ex]||[]).filter(x=>!x.warmup).length >= s.sets).length;
   h += `<div class="lede"><b>${doneCount?`${doneCount} of ${p.slots.length}`:`${p.slots.length} lifts`}</b>
     <span class="grow">${esc(sessionLine(p))}</span>
-    <a href="#" data-act="timecut">Short on time</a></div>`;
+    <a href="#" data-act="timecut">Less time</a></div>`;
 
   /* One card is live at a time; everything else is a single tappable row.
      Five identical blocks each carrying a 33-option picker was five times the
@@ -2339,6 +2393,7 @@ function renderSession(){
       <p class="sub" style="margin:6px 0 0"><span class="num">${setsDone}</span> sets across <span class="num">${p.slots.length}</span> lifts${ups?` · <span class="num">${ups}</span> load${ups>1?"s":""} up on last time`:""}.</p>
       <p class="mini" style="margin-top:6px">Tomorrow is planned from this the moment you finish.</p></div>`;
   }
+  h += runRow(date, true);
   // The only notes that belong on the session are the ones that reshaped it today.
   const loudNotes=(p.notes||[]).filter(n=>["SAF-05","CAP-01","MIS-01","OVERCONSTRAINED","PRG-10"].includes(n.rule));
   for(const n of loudNotes) h+=`<p class="why">${esc(n.text)}</p>`;
@@ -2353,15 +2408,31 @@ function weekStrip(date){
   let h=`<div class="week">`;
   for(let i=0;i<7;i++){
     const d=addDays(mon,i), isToday=d===date, plan=S.settings.days.includes(dow(d)), done=trained.has(d);
-    h+=`<div class="wd${isToday?" today":""}${plan?" plan":""}${done?" done":""}">
-      <span class="wl">${DAY_SHORT[dow(d)]}</span><span class="wn">${done?"✓":String(+d.slice(8))}</span></div>`;
+    const run=isRunDay(d), ran=S.runs[d]!=null, rest=isRestDay(d);
+    h+=`<div class="wd${isToday?" today":""}${plan?" plan":""}${done?" done":""}${rest?" rest":""}">
+      <span class="wl">${DAY_SHORT[dow(d)]}</span><span class="wn">${done?"✓":String(+d.slice(8))}</span>
+      <span class="wr${run?(ran?" ran":" run"):""}"></span></div>`;
   }
   return h+`</div>`;
+}
+/* The run is one line: what, how far, a tick. On a lifting day it sits after
+   the lifts — CON-02: same block of time, lift first, run after. That is the
+   order that protects the lifting adaptation (Murlasits 2018 favours
+   strength-first for lower-body strength; hypertrophy is indifferent), and
+   it is the honest default when the app cannot know the gap between them. */
+function runRow(date, afterLifts){
+  if(!isRunDay(date)) return "";
+  const miles=runOf().miles, done=S.runs[date]!=null;
+  return `<button class="runrow${done?" is-done":""}" data-act="runtick" data-d="${date}" aria-pressed="${done}">
+    <span class="mark">${done?"✓":"○"}</span>
+    <span class="grow"><b>Run ${miles} mi</b><span class="mini">${done?`logged`:afterLifts?"after the lifts":"today"}</span></span>
+    <span class="num">${runOf().days.length}×/wk</span></button>`;
 }
 function sessionLine(p){
   const bits=[`${p.minutes} min`];
   if(p.ramping) bits.push("easing in");
   else if(S.settings.phase==="CUT") bits.push("holding");
+  if(isRunDay(p.date) && S.runs[p.date]==null) bits.push("then run");
   return bits.join(" · ");
 }
 function nextTrainingDay(date){
@@ -2441,14 +2512,20 @@ const SECTIONS = [
       return h; } },
   { key:"phase", group:"You", title:"Right now I'm", value(){ return PH_LABEL[S.settings.phase]||""; },
     body(){ const st=S.settings; return `<div class="chips">${[["GAIN","Building"],["MAINTAIN","Maintaining"],["CUT","Cutting"]].map(([ph,l])=>`<button class="chip" aria-pressed="${st.phase===ph}" data-act="phase" data-p="${ph}" style="flex:1">${l}</button>`).join("")}</div>
-      <p class="mini" style="margin-top:10px">Cutting holds volume steady, keeps loads where they are, and widens the deload trigger.</p>`; } },
-  { key:"days", group:"You", title:"When I train", value(){ return S.settings.days.map(d=>DAY_SHORT[d]).join(" "); },
-    body(){ const st=S.settings; return `<div class="chips" style="margin-bottom:12px">${DAY_SHORT.map((d,i)=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}" style="flex:1;padding:0 6px">${d}</button>`).join("")}</div>
+      <p class="mini" style="margin-top:10px">Cutting holds volume steady, keeps loads where they are, and widens the deload trigger.</p>
+      ${weeklyRunMiles()?`<p class="mini" style="margin-top:6px">${runKcalLine()} ${st.phase==="CUT"?"That is most of a cut on its own — keep the scale falling no faster than about 1% a week, or the lifts will tell you first.":""}</p>`:""}`; } },
+  { key:"days", group:"You", title:"My week",
+    value(){ const r=runOf(); const rest=[1,2,3,4,5,6,0].filter(d=>!S.settings.days.includes(d)&&!r.days.includes(d));
+      return `${r.miles?`${r.miles} mi · `:""}rest ${rest.length?rest.map(d=>DAY_SHORT[d]).join(" "):"none"}`; },
+    body(){ const st=S.settings, r=runOf(); return `<p class="sub" style="margin-bottom:8px">Highlighted days are ${r.miles||0}-mile run days; tap one to make it a rest day. The gym picks whichever run days it needs.</p>
+      <div class="days7" style="margin-bottom:12px">${[1,2,3,4,5,6,0].map(i=>`<button class="chip" aria-pressed="${st.days.includes(i)}" data-act="day" data-d="${i}">${DAY_SHORT[i]}</button>`).join("")}</div>
       <div class="grid2">
-        <label class="fld"><span>Minutes I usually have</span><input type="number" id="mins" value="${st.minutes}"></label>
-        <label class="fld"><span>Bodyweight (${esc(u())})</span><input type="number" id="bwset" step="0.5" value="${r1(fromKg(st.bodyKg,u()))}"></label>
+        <label class="fld"><span>Run each of those days (mi)</span><input type="number" id="runmi" step="0.5" min="0" value="${r.miles}"></label>
+        <label class="fld"><span>Minutes I have to lift</span><input type="number" id="mins" value="${st.minutes}"></label>
       </div>
-      <button class="btn wide" data-act="savesched">Save</button>
+      <label class="fld" style="margin-top:8px"><span>Bodyweight (${esc(u())})</span><input type="number" id="bwset" step="0.5" value="${r1(fromKg(st.bodyKg,u()))}"></label>
+      <button class="btn wide" data-act="savesched" style="margin-top:10px">Save</button>
+      <p class="mini" style="margin-top:8px">${runKcalLine()}</p>
       <p class="mini" style="margin-top:6px">Protein floor ${Math.round(st.bodyKg*K.PROTEIN_G_PER_KG)} g a day.</p>
       <label class="row" style="margin-top:10px"><input type="checkbox" style="width:auto" ${st.unlockHighVolume?"checked":""} data-act="unlockvol"><span class="sub">Let a muscle go past 20 sets a week</span></label>`; } },
   { key:"gym", group:"You", title:"My gym", value(){ return S.settings.gym.name; },
@@ -2576,7 +2653,6 @@ function renderLog(){
   {
     const wk=isoWeek(todayISO());
     const thisWeek=S.sessions.filter(x=>x.week===wk);
-    const planned=S.settings.days.length;
     const setsDone=MUSCLES.reduce((a,m)=>a+S.mus[m].fsWeek,0);
     const setsPlan=MUSCLES.reduce((a,m)=>a+S.mus[m].target,0);
     const ups=thisWeek.reduce((n,sess)=>{
@@ -2584,9 +2660,11 @@ function renderLog(){
       for(const st of sess.sets){ if(st.warmup||seen.has(st.ex)) continue; seen.add(st.ex);
         const lp=lastPerformance(st.ex, sess.date); if(lp && st.load>lp.sets[0].load+LOAD_EPS) n++; }
       return n; },0);
+    const runsWk=Object.keys(S.runs).filter(d=>isoWeek(d)===wk).length, runPlan=runOf().days.length;
     h+=`<div class="card"><h3>This week</h3>
-      <div class="tiles">
-        <div class="tile"><b class="num">${thisWeek.length}<small>/${planned}</small></b><span>sessions</span></div>
+      <div class="tiles${runPlan?" four":""}">
+        <div class="tile"><b class="num">${thisWeek.length}</b><span>gym</span></div>
+        ${runPlan?`<div class="tile"><b class="num">${runsWk}<small>/${runPlan}</small></b><span>runs</span></div>`:""}
         <div class="tile"><b class="num">${Math.round(setsDone)}<small>/${Math.round(setsPlan)}</small></b><span>sets</span></div>
         <div class="tile"><b class="num">${ups}</b><span>lift${ups===1?"":"s"} up</span></div>
       </div>
@@ -2823,7 +2901,8 @@ async function handle(a,t,ev){
     return;
   }
   case "trainanyway": {
-    await append("settings",{days:[...new Set(S.settings.days.concat(dow(todayISO())))].sort()});
+    // One day, not a new weekly rule. Before this it quietly made the weekday permanent.
+    await append("settings",{trainAnyway:todayISO()});
     rebuild(); return render();
   }
   case "editset": {
@@ -3012,10 +3091,17 @@ async function handle(a,t,ev){
   case "phase": await append("settings",{phase:t.dataset.p}); rebuild(); return render();
   case "screen": await append("settings",{screening:t.dataset.v}); rebuild(); return render();
   case "day": { const d=+t.dataset.d;
-    const days = st.days.includes(d)?st.days.filter(x=>x!==d):st.days.concat(d).sort();
-    await append("settings",{days}); rebuild(); return render(); }
+    // A rest day is neither: run days and gym-eligible days move together.
+    const days = st.days.includes(d)?st.days.filter(x=>x!==d):st.days.concat(d).sort((a,b)=>a-b);
+    await append("settings",{days, run:{days:days.slice(), miles:runOf().miles}}); rebuild(); return render(); }
+  case "runtick": {
+    const d=t.dataset.d, done=S.runs[d]!=null;
+    await append("run", done ? {d, miles:0, done:false} : {d, miles:runOf().miles, done:true});
+    rebuild(); render(); return done ? undefined : toast(`${runOf().miles} miles logged.`, "ok");
+  }
   case "savesched": {
     const patch={minutes:+$("#mins").value};
+    const mi=$("#runmi"); if(mi && mi.value!=="" && +mi.value>=0) patch.run={days:st.days.slice(), miles:+mi.value};
     const bw=+($("#bwset")||{value:0}).value;
     if(bw>0) patch.bodyKg = toKg(bw, u());
     await append("settings",patch); rebuild(); render();
@@ -3138,7 +3224,15 @@ window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reaso
     // rampUntil especially — recomputing it daily would mean the ramp never ends.
     if(!S.events.some(e=>e.type==="settings")){
       await append("settings", { startDate: todayISO(),
-        rampUntil: addDays(todayISO(), K.RAMP_DAYS) });
+        rampUntil: addDays(todayISO(), K.RAMP_DAYS), scheduleRev: defaultSettings().scheduleRev });
+      rebuild();
+    }
+    /* A schedule he set later than the log began arrives as one more settings
+       event, dated the day it took effect. Old logs fold the old days until
+       this line, then the new ones — history stays exactly what it was. */
+    if(scheduleRevLogged() < 2){
+      const d=defaultSettings();
+      await append("settings", { days:d.days, run:d.run, scheduleRev:2 });
       rebuild();
     }
     const c = await canaryCheck();
