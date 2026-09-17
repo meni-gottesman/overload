@@ -1,7 +1,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-kivanYnFSu/KY4D9qPzBaADWDupQYBnsnaZ/O4wwDAM='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-0HhTsJT6BNhIQpFeBEgnMes1pCMLEX4kJsstdcpXy8Q='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src https://api.github.com; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#f3f4f8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0b0e14" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -315,7 +315,7 @@ details.more[open]>summary{color:var(--ink)}
    =================================================================== */
 
 if (self !== top) { top.location = self.location; }
-const BUILD = "2026-09-14 14:04";  // frame-buster: CSP meta cannot set frame-ancestors
+const BUILD = "2026-09-16 17:00";  // frame-buster: CSP meta cannot set frame-ancestors
 
 /* ============================ CONSTANTS ============================ */
 const K = {
@@ -376,6 +376,7 @@ const K = {
   CUT_BAND: [-0.010, -0.005],    // -0.5..-1.0 %BW/wk
 
   /* --- allocation (VOL-13..15) --- */
+  ABS_DAILY_SETS: [2,4],    // SEL-08 abs every lifting day, 2-4 sets. ENGINEERING DEFAULT: daily is his call; the band keeps five days a week inside the weekly budget.
   BUDGET: { CUT:60, MAINTAIN:75, GAIN:90 },   // VOL-13 total fractional sets/week by phase.
                             // Key names must match the phase enum exactly — a mismatched key
                             // falls through to MAINTAIN and silently underfeeds a growth block.
@@ -842,12 +843,14 @@ function defaultSettings(){
        decides each day what is due; it does not owe the week a fixed shape.
        scheduleRev lets a later note change this by appending a settings
        event, never by editing history. */
-    days:[1,2,4,5,6], run:{days:[1,2,4,5,6], miles:5}, scheduleRev:3,
+    days:[1,2,4,5,6], run:{days:[1,2,4,5,6], miles:5}, scheduleRev:4,
     minutes:120, slotHour:17, phase:"CUT",
-    /* Day 1 (2026-09-14, his call): the program starts Tue 15 Sep 2026 at
+    /* Day 1 (his call, 2026-09-16): the program starts Wed 16 Sep 2026 at
        full sets and normal reps in reserve — no calibration ramp, no 15-rep
-       test. Loads on day 1 are ENG-05 guesses that his first sets replace. */
-    screening:"CLEAR", rampUntil:null, startDate:"2026-09-15",
+       test. Loads on day 1 are ENG-05 guesses that his first sets replace.
+       Wednesday is a rest day in his week, so day 1 is a one-off lift there;
+       the week's shape is untouched from Thursday on. Abs every session. */
+    screening:"CLEAR", rampUntil:null, startDate:"2026-09-16", trainAnyway:"2026-09-16", dailyAbs:true,
     w:{...W_MALE}, tier:defaultTiers(), indexLift:defaultIndexLifts(), sex:"male",
     bodyKg:toKg(180,"lb"), heightCm:177.8, firstRun:true,
     allowOverrule:true, spotterAt:0, unlockHighVolume:false, repo:null, tokenSet:false };
@@ -1357,6 +1360,7 @@ function fmtLoad(kg){ if(kg==null) return "—";
   const v=fromKg(kg,u()); const r=Math.abs(v-Math.round(v))<0.05?Math.round(v):Math.round(v*10)/10;
   return r+" "+u(); }
 function fmtL(e,kg){ if(kg==null) return "—";
+  if(e && e.profile==="bodyweight" && Math.abs(kg)<=LOAD_EPS) return "bodyweight";
   return (e && e.profile==="dumbbell_pair" && e.perSide ? "2 × " : "") + fmtLoad(kg); }
 
 /* ===================== PLATE MATH ==================================
@@ -1636,6 +1640,13 @@ function buildPlan(date){
     pool = pool.slice(0, perDay);
   }
 
+  /* SEL-08: abs on every lifting day (his call, 2026-09-16). Abs sit outside
+     the 48-hour spacing and the weekly-deficit gate: they go on the end of
+     every session, never displacing a muscle that is due, and the lift
+     rotates day to day so it is not the same movement five times a week. */
+  const dailyAbs = !!st.dailyAbs && isTrainingDay;
+  if(dailyAbs && !pool.includes("abs")) pool.push("abs");
+
   /* --- Phase 4: exercise selection (SEL-04..06) ----------------- */
   const block = Math.floor(daysBetween(st.startDate,date)/(7*K.ROTATION_BLOCK_WEEKS));
   const flagged = JOINTS.filter(j=>(S.irr[j]||{sev:0}).sev>=6);
@@ -1646,11 +1657,13 @@ function buildPlan(date){
   for(const m of pool){
     const ms=S.mus[m];
     const idx = st.indexLift[m];
-    if(slots.length >= K.MAX_SLOTS) break;
-    const cands = candidatesFor(m, block).filter(e=>!usedPatterns.has(e.pattern));
+    const absDaily = dailyAbs && m==="abs";
+    if(slots.length >= K.MAX_SLOTS && !absDaily) break;   // the daily abs slot rides on top of the cap
+    let cands = candidatesFor(m, block).filter(e=>!usedPatterns.has(e.pattern));
+    if(absDaily && cands.length){ const off = (dayNumber(date)-1) % cands.length; cands = cands.slice(off).concat(cands.slice(0,off)); }
     const chosen=[];
-    if(idx && LIBX[idx] && available(LIBX[idx]) && jointOK(LIBX[idx]) && !usedPatterns.has(LIBX[idx].pattern)) chosen.push(LIBX[idx]);
-    const wantEx = ms.tier==="PRIORITY" ? 2 : 1;   // specialisation is funded by taking from elsewhere
+    if(idx && LIBX[idx] && available(LIBX[idx]) && jointOK(LIBX[idx]) && !usedPatterns.has(LIBX[idx].pattern) && !absDaily) chosen.push(LIBX[idx]);
+    const wantEx = ms.tier==="PRIORITY" && !absDaily ? 2 : 1;   // specialisation is funded by taking from elsewhere
     for(const e of cands){ if(chosen.length>=wantEx) break; if(chosen.some(c=>c.id===e.id)) continue; chosen.push(e); }
     if(!chosen.length) continue;
 
@@ -1659,9 +1672,10 @@ function buildPlan(date){
               : ms.tier==="MAINTAIN" ? target*0.33 : target;
     let want = Math.max(1, Math.round(Math.min(K.SESSION_CAP, eff/needed[m]) * setScale));
     if(m==="obliques") want = Math.min(want, K.OBLIQUE_MAX_DIRECT);   // SEL-05
+    if(absDaily) want = clamp(want, K.ABS_DAILY_SETS[0], K.ABS_DAILY_SETS[1]);   // SEL-08
 
     for(const e of chosen){
-      if(slots.length >= K.MAX_SLOTS) break;
+      if(slots.length >= K.MAX_SLOTS && !absDaily) break;
       const es=exState(e.id);
       const share = Math.max(1, Math.round(want/chosen.length));
       const sets = Math.min(share, ctx.maxSets);
@@ -1669,12 +1683,16 @@ function buildPlan(date){
       if(minutes + est > budget*60 && slots.length){ notes.push({rule:"CAP-01",
         text:`Ran out of your ${budget} minutes — ${MUSCLE_LABEL[m].toLowerCase()} work moves to your next session.`}); break; }
       minutes += est; usedPatterns.add(e.pattern);
-      slots.push(buildSlot(e, es, m, sets, ctx, ms, bumpRir, date));
+      const sl = buildSlot(e, es, m, sets, ctx, ms, bumpRir, date);
+      if(absDaily) sl.absDaily = true;
+      slots.push(sl);
     }
   }
 
-  /* --- order: index lifts first, unfailsafe never last-fatigued -- */
-  slots.sort((a,b)=> (b.isIndex?1:0)-(a.isIndex?1:0) || (a.risk-b.risk));
+  /* --- order: index lifts first, unfailsafe never last-fatigued, the
+     daily abs slot last — a tired trunk under a squat or RDL is the one
+     place core fatigue costs something. */
+  slots.sort((a,b)=> (a.absDaily?1:0)-(b.absDaily?1:0) || (b.isIndex?1:0)-(a.isIndex?1:0) || (a.risk-b.risk));
   slots.forEach((s,i)=>s.pos=i+1);
 
   const calib = calibrationTarget(slots, ctx, date);          // PRG-10
@@ -3264,8 +3282,9 @@ window.addEventListener("unhandledrejection", e=>{ try{ toast("Error: "+(e.reaso
        this line, then the new ones — history stays exactly what it was. */
     if(scheduleRevLogged() < defaultSettings().scheduleRev){
       const d=defaultSettings();
-      // rev 2: his week. rev 3: day 1 is 2026-09-15, no ramp. One event carries both.
-      await append("settings", { days:d.days, run:d.run, startDate:d.startDate, rampUntil:d.rampUntil, scheduleRev:d.scheduleRev });
+      // rev 2: his week. rev 3: no ramp. rev 4: day 1 is 2026-09-16, abs every session. One event carries all.
+      await append("settings", { days:d.days, run:d.run, startDate:d.startDate, rampUntil:d.rampUntil,
+        trainAnyway:d.trainAnyway, dailyAbs:d.dailyAbs, scheduleRev:d.scheduleRev });
       rebuild();
     }
     const c = await canaryCheck();

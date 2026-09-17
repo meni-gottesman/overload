@@ -619,6 +619,7 @@ run(`
   for(const m of MUSCLES) S.mus[m]=newMuscleState(); for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
   S.ex={}; S.sessions=[]; S.events=[]; S.planEdits={}; S.plans={}; S.runs={};
   DEF_DAYS=S.settings.days.join(); DEF_RUN=JSON.stringify(S.settings.run); DEF_REV=S.settings.scheduleRev;
+  delete S.settings.trainAnyway;   // day 1's one-off Wednesday is tested in the DAY 1 block; this block is the weekly shape
   // 2026-09-14 is a Monday
   const W=["2026-09-14","2026-09-15","2026-09-16","2026-09-17","2026-09-18","2026-09-19","2026-09-20"];
   SLOTS=W.map(d=>buildPlan(d).slots.length);
@@ -644,7 +645,7 @@ run(`
   NEEDS_REV=scheduleRevLogged()<2;
   // rendering: Monday shows the run row after the lifts, Wednesday shows a rest card and no run
   S.events.push({id:5,type:"settings",d:"2026-09-14",payload:{days:[1,2,4,5,6],run:{days:[1,2,4,5,6],miles:5},scheduleRev:2}});
-  rebuild(); S.settings.startDate="2026-09-01"; S.settings.rampUntil="2026-09-02";
+  rebuild(); S.settings.startDate="2026-09-01"; S.settings.rampUntil="2026-09-02"; delete S.settings.trainAnyway;
   const realToday=todayISO;
   todayISO=()=>"2026-09-14"; renderSession(); MON_HTML=document.querySelector("#v-session").innerHTML;
   todayISO=()=>"2026-09-16"; renderSession(); WED_HTML=document.querySelector("#v-session").innerHTML;
@@ -657,7 +658,7 @@ run(`
   TILE_RUNS=LOG_HTML.includes("1<small>/5</small></b><span>runs");
   MYWEEK=SECTIONS.find(x=>x.key==="days").value();
 `);
-ok("defaults: run days Mon Tue Thu Fri Sat, 5 miles, schedule rev 3", ctx.DEF_DAYS==="1,2,4,5,6" && ctx.DEF_RUN==='{"days":[1,2,4,5,6],"miles":5}' && ctx.DEF_REV===3, ctx.DEF_DAYS+" "+ctx.DEF_RUN);
+ok("defaults: run days Mon Tue Thu Fri Sat, 5 miles, schedule rev 4", ctx.DEF_DAYS==="1,2,4,5,6" && ctx.DEF_RUN==='{"days":[1,2,4,5,6],"miles":5}' && ctx.DEF_REV===4, ctx.DEF_DAYS+" "+ctx.DEF_RUN);
 ok("Wednesday and Sunday are rest days, the other five are run days", ctx.RESTFLAGS==="0010001" && ctx.RUNFLAGS==="1101110", ctx.RESTFLAGS+" / "+ctx.RUNFLAGS);
 ok("rest days get NO lifting slots — before this a Wednesday built a full session", ctx.SLOTS[2]===0 && ctx.SLOTS[6]===0, ctx.SLOTS.join());
 ok("run days can carry a session", ctx.SLOTS[0]>0, ctx.SLOTS.join());
@@ -678,9 +679,9 @@ run(`
   for(const m of MUSCLES) S.mus[m]=newMuscleState(); for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
   S.ex={}; S.sessions=[]; S.events=[]; S.planEdits={}; S.plans={}; S.runs={};
   START=S.settings.startDate; RAMP=S.settings.rampUntil;
-  const pre=buildPlan("2026-09-14"), d1=buildPlan("2026-09-15");
+  const pre=buildPlan("2026-09-15"), d1=buildPlan("2026-09-16");   // day 1 is a Wednesday, lifted as a one-off
   PRE_SLOTS=pre.slots.length; PRE_NOTE=(pre.notes.find(n=>n.rule==="USER")||{}).text||"";
-  PRE_RUN=isRunDay("2026-09-14"); D1_RUN=isRunDay("2026-09-15");
+  PRE_RUN=isRunDay("2026-09-15"); D1_RUN=isRunDay("2026-09-16"); NEXT_WED=buildPlan("2026-09-23").slots.length;
   D1_SLOTS=d1.slots.length; D1_RAMP=!!d1.ramping;
   D1_LOADS_SET=d1.slots.every(sl=>sl.load!=null && sl.seedGuess===true && !sl.needsSeed);
   D1_LOADS_LEGAL=d1.slots.every(sl=>sl.loadSet.some(v=>Math.abs(v-sl.load)<=LOAD_EPS));
@@ -703,14 +704,42 @@ run(`
     {id:3,type:"sessionEnd",d:"2026-08-03",payload:{d:"2026-08-03",minutes:30}}];
   rebuild(); OLD_MULT=Math.round(fromKg(S.ex.lat_pulldown.load,"lb"));
 `);
-ok("day 1 is 2026-09-15 and there is no ramp", ctx.START==="2026-09-15" && ctx.RAMP===null, ctx.START+" "+ctx.RAMP);
-ok("the day before day 1 prescribes nothing and says why", ctx.PRE_SLOTS===0 && /Day 1 is 2026-09-15/.test(ctx.PRE_NOTE) && ctx.PRE_RUN===false, ctx.PRE_NOTE);
+ok("day 1 is 2026-09-16 and there is no ramp", ctx.START==="2026-09-16" && ctx.RAMP===null, ctx.START+" "+ctx.RAMP);
+ok("the day before day 1 prescribes nothing and says why", ctx.PRE_SLOTS===0 && /Day 1 is 2026-09-16/.test(ctx.PRE_NOTE) && ctx.PRE_RUN===false, ctx.PRE_NOTE);
+ok("day 1 lifts on a Wednesday as a one-off; the next Wednesday is rest again", ctx.D1_SLOTS>0 && ctx.NEXT_WED===0 && ctx.D1_RUN===false, ctx.D1_SLOTS+" / "+ctx.NEXT_WED);
 ok("day 1 is a full session with normal reps in reserve, not the 2-set / 3-RIR ramp", ctx.D1_SLOTS>0 && ctx.D1_RAMP===false && ctx.D1_FULL, "sets "+ctx.D1_SETS+" rir "+ctx.D1_RIR);
 ok("every day-1 lift carries a guessed load the gym can make", ctx.D1_LOADS_SET && ctx.D1_LOADS_LEGAL);
 ok("the bench guess is plausible for 180 lb (95-105 lb)", ctx.BENCH_LB>=95 && ctx.BENCH_LB<=105, ctx.BENCH_LB+" lb");
 ok("a set logged against the guess becomes the load (no x1.12), and progression runs from there", ctx.NO_MULT===true, ctx.GUESS+" -> "+ctx.AFTER_LOAD);
 ok("day numbering: day 1, then day 2 after one session", ctx.DAY1===1 && ctx.DAY2===2, ctx.DAY1+" "+ctx.DAY2);
 ok("old logs whose first set was the 15-rep test still fold with the multiplier", ctx.OLD_MULT===110, ctx.OLD_MULT);
+
+console.log("\nSEL-08 — abs on every lifting day");
+run(`
+  S.settings=defaultSettings(); S.settings.screening="CLEAR"; delete S.settings.trainAnyway;
+  for(const m of MUSCLES) S.mus[m]=newMuscleState(); for(const j of JOINTS) S.irr[j]={sev:0,at:null,quality:null};
+  S.ex={}; S.sessions=[]; S.events=[]; S.planEdits={}; S.plans={}; S.runs={};
+  S.settings.startDate="2026-09-16";
+  const W8=["2026-09-17","2026-09-18","2026-09-19","2026-09-20","2026-09-21","2026-09-22","2026-09-23"]; // Thu..Wed
+  const plans8=W8.map(d=>buildPlan(d));
+  const absOf=p=>p.slots.filter(x=>x.muscle==="abs");
+  GYM_DAYS=W8.filter(d=>isGymDay(d)).length;
+  ABS_ON_GYM=plans8.filter((p,i)=>isGymDay(W8[i])).every(p=>absOf(p).length===1 && absOf(p)[0].sets>=2 && absOf(p)[0].sets<=4);
+  ABS_ON_REST=plans8.filter((p,i)=>!isGymDay(W8[i])).some(p=>absOf(p).length>0);
+  ABS_LAST=plans8.filter((p,i)=>isGymDay(W8[i])).every(p=>p.slots[p.slots.length-1].muscle==="abs");
+  ABS_SETS=plans8.filter((p,i)=>isGymDay(W8[i])).map(p=>absOf(p)[0].sets);
+  // rotation: pretend a session happened each day so dayNumber advances
+  const exs=[]; for(const i of [0,1,2,4]){ const d=W8[i]; const p=buildPlan(d); exs.push(absOf(p)[0].ex); S.sessions.push({date:d,week:isoWeek(d),sets:[],minutes:30}); }
+  S.sessions=[]; ABS_ROTATES=new Set(exs).size>1; ABS_EXS=exs.join();
+  // it never displaces a due muscle: same non-abs slots with the flag off
+  const nonAbs=p=>p.slots.filter(x=>x.muscle!=="abs").map(x=>x.ex+":"+x.sets).join();
+  const withAbs=nonAbs(buildPlan("2026-09-17")); S.settings.dailyAbs=false; const withoutAbs=nonAbs(buildPlan("2026-09-17")); S.settings.dailyAbs=true;
+  NO_DISPLACE = withAbs===withoutAbs; WITH=withAbs; WITHOUT=withoutAbs;
+`);
+ok("every lifting day carries exactly one abs slot of 2-4 sets, none on rest days", ctx.ABS_ON_GYM===true && ctx.ABS_ON_REST===false, ctx.ABS_SETS.join()+" on "+ctx.GYM_DAYS+" gym days");
+ok("abs go last", ctx.ABS_LAST===true);
+ok("the abs movement rotates day to day", ctx.ABS_ROTATES===true, ctx.ABS_EXS);
+ok("daily abs never displaces a muscle that is due", ctx.NO_DISPLACE===true, ctx.WITH+" vs "+ctx.WITHOUT);
 
 console.log("\nSAF-PIN — a swap must re-derive safety, not inherit it");
 run(`
