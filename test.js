@@ -741,6 +741,26 @@ ok("abs go last", ctx.ABS_LAST===true);
 ok("the abs movement rotates day to day", ctx.ABS_ROTATES===true, ctx.ABS_EXS);
 ok("daily abs never displaces a muscle that is due", ctx.NO_DISPLACE===true, ctx.WITH+" vs "+ctx.WITHOUT);
 
+console.log("\nRSF — the library matches what the gym actually has");
+run(`
+  S.settings=defaultSettings();
+  const avail=LIB.filter(e=>available(e)).map(e=>e.id);
+  RSF_GONE=["hack_squat","standing_calf","seated_calf","lying_leg_curl","assisted_pullup"].filter(id=>avail.includes(id));
+  RSF_NEW=["leg_press_calf","db_calf_raise","hanging_leg_raise"].filter(id=>!avail.includes(id));
+  UNCOVERED=MUSCLES.filter(m=>!NO_DIRECT.has(m) && !LIB.some(e=>available(e) && (e.contributions[m]||0)>=1));
+  NO_HOWTO=avail.filter(id=>!HOWTO[id]);
+  CALF_INDEX=S.settings.indexLift.calves;
+  CSR_STACK=LIBX.csr_row.profile;
+`);
+const missingImg=[];
+for(const id of run("LIB.filter(e=>available(e)).map(e=>e.id)")) for(const k of [0,1]) if(!fs.existsSync(`img/${id}_${k}.jpg`)) missingImg.push(`${id}_${k}`);
+ok("machines the RSF does not have are unavailable", ctx.RSF_GONE.length===0, ctx.RSF_GONE.join());
+ok("the RSF substitutes are available", ctx.RSF_NEW.length===0, ctx.RSF_NEW.join());
+ok("every direct muscle still has a prime mover at the RSF", ctx.UNCOVERED.length===0, ctx.UNCOVERED.join());
+ok("every available lift has how-to steps", ctx.NO_HOWTO.length===0, ctx.NO_HOWTO.join());
+ok("every available lift has both photos committed", missingImg.length===0, missingImg.join());
+ok("calves index on the leg-press calf press; the Cybex row is a stack machine", ctx.CALF_INDEX==="leg_press_calf" && ctx.CSR_STACK==="machine_stack", ctx.CALF_INDEX+" "+ctx.CSR_STACK);
+
 console.log("\nSAF-PIN — a swap must re-derive safety, not inherit it");
 run(`
   S.settings=defaultSettings(); S.settings.spotterAt=0; S.settings.screening="CLEAR";

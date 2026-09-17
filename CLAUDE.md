@@ -6,7 +6,7 @@ Deployed on every push to `main`, twice:
   - Cloudflare Pages → https://overload-o3a.pages.dev  (isolated origin; `_headers` applies here only)
 Both serve the same commit. IndexedDB is per-origin, so they hold separate local logs
 until backup is connected. GitHub Pages ignores `_headers` and caches for 10 minutes.
-Tests: `node test.js` (151 assertions) **and** `node test-sync.js` (31 assertions, runs the
+Tests: `node test.js` (157 assertions) **and** `node test-sync.js` (31 assertions, runs the
 real Sync code against a mock GitHub and an in-memory IndexedDB). Both must be green.
 
 ## The one rule that outranks everything
@@ -101,6 +101,10 @@ Do not edit the fixture to make it pass — the fixture is the contract.
 - **Abs every lifting day (SEL-08, `dailyAbs`).** Outside the 48-hour spacing and the
   weekly-deficit gate; one slot of 2-4 sets, rotating movement, always last, never displacing
   a muscle that is due, rides on top of `MAX_SLOTS`.
+- **The RSF equipment list is evidence, not assumption.** `RSF_DEFAULT_GYM.equipment` was
+  verified 2026-09-16 (RecWell page, Daily Cal Sep 2024, Yelp 2014/2018 inventories, r/berkeley
+  2025). No calf machine, no hack squat, no lying leg curl there — calves go on the leg press
+  sled or dumbbells. Change the list only with a source, and add the source to the comment.
 - **Lifts he has said no to are `retired`, never deleted.** `available()` refuses a retired
   exercise, so no plan, alternative or swap can pick it; the library entry stays so any set
   already logged on it keeps its name, photo and muscle credit. Assisted machines are retired
